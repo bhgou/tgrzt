@@ -1,0 +1,9 @@
+node_modules
+.DS_Store
+.env
+data/demo-stage.sqlite
+data/uploads/**
+!data/uploads/.gitkeep
+!data/uploads/wav/.gitkeep
+!data/uploads/mp3/.gitkeep
+!data/uploads/avatars/.gitkeep

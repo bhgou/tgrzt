@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#081420" />
+    <title>Demo Stage</title>
+    <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/styles.css?v=support-chat-3" />
+  </head>
+  <body>
+    <div class="ambient ambient-a"></div>
+    <div class="ambient ambient-b"></div>
+    <div class="music-wave music-wave-left" aria-hidden="true"></div>
+    <div class="music-wave music-wave-right" aria-hidden="true"></div>
+    <div class="music-note music-note-a" aria-hidden="true">♪</div>
+    <div class="music-note music-note-b" aria-hidden="true">♬</div>
+    <div class="shell">
+      <header class="topbar">
+        <div class="brand">
+          <div class="logo-mark">DS</div>
+          <div class="brand-copy">
+            <p class="eyebrow">Telegram Music Mini App</p>
+            <h1>Demo Stage</h1>
+          </div>
+        </div>
+        <div id="topbar-meta"></div>
+      </header>
+
+      <main id="app" class="app-root"></main>
+
+      <nav class="bottom-nav">
+        <button class="nav-btn is-active" data-view="home">Главная</button>
+        <button class="nav-btn" data-view="search">Поиск</button>
+        <button class="nav-btn" data-view="upload">Загрузить</button>
+        <button class="nav-btn" data-view="profile">Кабинет</button>
+      </nav>
+    </div>
+
+    <button id="support-toggle" class="support-fab" type="button">Поддержка</button>
+    <div id="support-backdrop" class="support-backdrop"></div>
+    <aside id="support-drawer" class="support-drawer"></aside>
+    <div id="toast" class="toast"></div>
+
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <script type="module" src="/app.js?v=support-chat-3"></script>
+  </body>
+</html>
