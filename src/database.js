@@ -83,6 +83,12 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_ratings_track_id ON ratings (track_id);
   CREATE INDEX IF NOT EXISTS idx_likes_track_id ON likes (track_id);
   CREATE INDEX IF NOT EXISTS idx_support_messages_user_id ON support_messages (user_id, created_at ASC);
+
+  CREATE TABLE IF NOT EXISTS admin_settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
 `);
 
 const userColumns = db.prepare('PRAGMA table_info(users)').all();
@@ -1009,4 +1015,232 @@ export function deleteTrack(actorUserId, trackId) {
     mp3Path: track.mp3_path,
     deletedAsAdmin: Boolean(actor.isAdmin && Number(track.owner_id) !== Number(actorUserId)),
   };
+}
+
+// Admin management functions
+
+function getAdminUserIds() {
+  const row = db.prepare('SELECT value FROM admin_settings WHERE key = :key').get({ key: 'admin_telegram_ids' });
+  if (!row) {
+    return [];
+  }
+  try {
+    return JSON.parse(row.value);
+  } catch {
+    return [];
+  }
+}
+
+function saveAdminUserIds(ids) {
+  const timestamp = nowIso();
+  db.prepare(`
+    INSERT INTO admin_settings (key, value, updated_at)
+    VALUES ('admin_telegram_ids', :value, :updatedAt)
+    ON CONFLICT(key) DO UPDATE SET value = :value, updated_at = :updatedAt
+  `).run({
+    value: JSON.stringify(ids),
+    updatedAt: timestamp,
+  });
+}
+
+export function addAdmin(userId) {
+  const user = getUserById(userId);
+  if (!user) {
+    throw httpError(404, 'Пользователь не найден.');
+  }
+
+  const adminIds = getAdminUserIds();
+  const telegramIdStr = String(user.telegramId);
+
+  if (!adminIds.includes(telegramIdStr)) {
+    adminIds.push(telegramIdStr);
+    saveAdminUserIds(adminIds);
+  }
+
+  return { ok: true, user: mapUserRecord(user) };
+}
+
+export function removeAdmin(userId) {
+  const user = getUserById(userId);
+  if (!user) {
+    throw httpError(404, 'Пользователь не найден.');
+  }
+
+  const adminIds = getAdminUserIds();
+  const telegramIdStr = String(user.telegramId);
+  const filtered = adminIds.filter(id => id !== telegramIdStr);
+
+  if (filtered.length !== adminIds.length) {
+    saveAdminUserIds(filtered);
+  }
+
+  return { ok: true, user: mapUserRecord(user) };
+}
+
+export function isUserAdmin(userId) {
+  const user = getUserById(userId);
+  if (!user) {
+    return false;
+  }
+  return isAdminIdentity({ telegramId: user.telegramId, username: user.username });
+}
+
+export function getAllUsers(options = {}) {
+  const limit = options.limit ?? 50;
+  const offset = options.offset ?? 0;
+
+  const rows = db.prepare(`
+    ${getUserSelect()}
+    ORDER BY u.created_at DESC
+    LIMIT :limit OFFSET :offset
+  `).all({ limit: Number(limit), offset: Number(offset) });
+
+  return rows.map(mapUserRecord);
+}
+
+export function getAdminUsers() {
+  const adminIds = getAdminUserIds();
+  if (adminIds.length === 0) {
+    return [];
+  }
+
+  const params = {};
+  const placeholders = adminIds.map((id, index) => {
+    const key = `id${index}`;
+    params[key] = id;
+    return `:${key}`;
+  }).join(', ');
+
+  const rows = db.prepare(`
+    ${getUserSelect()}
+    WHERE u.telegram_id IN (${placeholders})
+    ORDER BY u.created_at DESC
+  `).all(params);
+
+  return rows.map(mapUserRecord);
+}
+
+export function transferArtistData(fromUserId, toUserId) {
+  const fromUser = getUserById(fromUserId);
+  const toUser = getUserById(toUserId);
+
+  if (!fromUser) {
+    throw httpError(404, 'Исходный пользователь не найден.');
+  }
+
+  if (!toUser) {
+    throw httpError(404, 'Целевой пользователь не найден.');
+  }
+
+  if (fromUser.id === toUser.id) {
+    throw httpError(400, 'Нельзя перенести данные на того же пользователя.');
+  }
+
+  const fromId = Number(fromUserId);
+  const toId = Number(toUserId);
+
+  db.exec('BEGIN TRANSACTION');
+
+  try {
+    // Переносим треки
+    db.prepare('UPDATE tracks SET owner_id = :toId WHERE owner_id = :fromId').run({
+      toId,
+      fromId,
+    });
+
+    // Переносим рейтинги (если есть конфликты, заменяем)
+    db.prepare(`
+      INSERT OR REPLACE INTO ratings (user_id, track_id, score, created_at, updated_at)
+      SELECT :toId, track_id, score, created_at, updated_at
+      FROM ratings
+      WHERE user_id = :fromId
+    `).run({ toId, fromId });
+
+    db.prepare('DELETE FROM ratings WHERE user_id = :fromId AND track_id IN (SELECT id FROM tracks WHERE owner_id = :toId)').run({
+      fromId,
+      toId,
+    });
+
+    // Переносим лайки
+    db.prepare(`
+      INSERT OR REPLACE INTO likes (user_id, track_id, created_at)
+      SELECT :toId, track_id, created_at
+      FROM likes
+      WHERE user_id = :fromId
+    `).run({ toId, fromId });
+
+    db.prepare('DELETE FROM likes WHERE user_id = :fromId').run({ fromId });
+
+    // Переносим комментарии
+    db.prepare('UPDATE comments SET user_id = :toId WHERE user_id = :fromId').run({
+      toId,
+      fromId,
+    });
+
+    // Переносим подписки (как подписчик)
+    db.prepare(`
+      INSERT OR REPLACE INTO follows (follower_id, artist_id, created_at)
+      SELECT :toId, artist_id, created_at
+      FROM follows
+      WHERE follower_id = :fromId
+    `).run({ toId, fromId });
+
+    db.prepare('DELETE FROM follows WHERE follower_id = :fromId').run({ fromId });
+
+    // Переносим подписки (как артист, за кем подписаны)
+    db.prepare(`
+      INSERT OR REPLACE INTO follows (follower_id, artist_id, created_at)
+      SELECT follower_id, :toId, created_at
+      FROM follows
+      WHERE artist_id = :fromId AND follower_id != :toId
+    `).run({ toId, fromId });
+
+    db.prepare('DELETE FROM follows WHERE artist_id = :fromId AND follower_id != :toId').run({ fromId });
+
+    // Переносим сообщения поддержки
+    db.prepare('UPDATE support_messages SET user_id = :toId WHERE user_id = :fromId').run({
+      toId,
+      fromId,
+    });
+
+    // Удаляем старого пользователя
+    db.prepare('DELETE FROM users WHERE id = :fromId').run({ fromId });
+
+    db.exec('COMMIT');
+
+    return {
+      ok: true,
+      transferred: {
+        fromUser: { id: fromUser.id, telegramId: fromUser.telegramId, nickname: fromUser.nickname },
+        toUser: { id: toUser.id, telegramId: toUser.telegramId, nickname: toUser.nickname },
+      },
+    };
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+}
+
+export function linkArtistToTelegram(telegramId, artistNickname) {
+  const existingUser = db
+    .prepare('SELECT id, telegram_id, nickname, role, is_registered FROM users WHERE telegram_id = :telegramId')
+    .get({ telegramId: String(telegramId) });
+
+  if (!existingUser) {
+    throw httpError(404, 'Пользователь с таким Telegram ID не найден.');
+  }
+
+  const artistUser = db
+    .prepare('SELECT id, telegram_id, nickname, role, is_registered FROM users WHERE nickname = :nickname COLLATE NOCASE AND role = :role')
+    .get({ nickname: artistNickname, role: 'artist' });
+
+  if (!artistUser) {
+    throw httpError(404, `Артист с никнеймом "${artistNickname}" не найден.`);
+  }
+
+  if (existingUser.id === artistUser.id) {
+    throw httpError(400, 'Этот пользователь уже привязан к данному артисту.');
+  }
+
+  return transferArtistData(artistUser.id, existingUser.id);
 }

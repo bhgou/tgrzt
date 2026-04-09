@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm start)",
+      "Bash(timeout *)",
+      "Bash(curl *)",
+      "Bash(taskkill *)",
+      "Bash(sqlite3 *)",
+      "Bash(node *)"
+    ]
+  },
+  "$version": 3
+}

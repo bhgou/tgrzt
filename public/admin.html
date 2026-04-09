@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#081420" />
+    <title>Admin Panel - Demo Stage</title>
+    <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/styles.css?v=admin-panel-1" />
+    <link rel="stylesheet" href="/admin.css?v=admin-panel-1" />
+  </head>
+  <body>
+    <div class="ambient ambient-a"></div>
+    <div class="ambient ambient-b"></div>
+    <div class="shell">
+      <header class="topbar">
+        <div class="brand">
+          <div class="logo-mark">AD</div>
+          <div class="brand-copy">
+            <p class="eyebrow">Admin Panel</p>
+            <h1>Управление пользователями</h1>
+          </div>
+        </div>
+        <div id="admin-user-info"></div>
+      </header>
+
+      <main id="app" class="app-root">
+        <section class="panel auth-card" id="login-panel">
+          <p class="eyebrow">Admin Access</p>
+          <h3>Проверка доступа...</h3>
+          <p class="muted">Пожалуйста, подождите</p>
+        </section>
+
+        <section class="panel" id="admin-panel" style="display: none;">
+          <div class="admin-header">
+            <div>
+              <p class="eyebrow">Welcome, Admin</p>
+              <h3>Панель администратора</h3>
+            </div>
+            <div class="admin-header-actions">
+              <button class="btn-ghost" id="back-btn">← Назад</button>
+              <button class="btn-ghost" id="logout-btn">Закрыть</button>
+            </div>
+          </div>
+
+          <div class="admin-tabs">
+            <button class="admin-tab is-active" data-tab="users"><span>👥 Все пользователи</span></button>
+            <button class="admin-tab" data-tab="admins"><span>👑 Администраторы</span></button>
+            <button class="admin-tab" data-tab="link-artist"><span>🔗 Привязка артиста</span></button>
+          </div>
+
+          <div id="users-tab" class="admin-tab-content">
+            <div class="admin-search">
+              <input
+                id="user-search-input"
+                type="text"
+                placeholder="Поиск по имени, username или Telegram ID..."
+              />
+            </div>
+
+            <div id="users-list" class="users-list">
+              <div class="empty-state">
+                <strong>Загрузка пользователей...</strong>
+                <span class="muted">Пожалуйста, подождите.</span>
+              </div>
+            </div>
+          </div>
+
+          <div id="admins-tab" class="admin-tab-content" style="display: none;">
+            <div class="admin-add-admin">
+              <h4>Добавить администратора</h4>
+              <form id="add-admin-form" class="inline-form">
+                <div class="field">
+                  <label for="new-admin-id">Telegram ID пользователя</label>
+                  <input
+                    id="new-admin-id"
+                    name="telegramId"
+                    type="text"
+                    placeholder="Введите Telegram ID"
+                    required
+                  />
+                </div>
+                <button class="btn-secondary" type="submit">Добавить</button>
+              </form>
+            </div>
+
+            <div id="admins-list" class="admins-list">
+              <div class="empty-state">
+                <strong>Загрузка списка администраторов...</strong>
+                <span class="muted">Пожалуйста, подождите.</span>
+              </div>
+            </div>
+          </div>
+
+          <div id="link-artist-tab" class="admin-tab-content" style="display: none;">
+            <section class="admin-link-artist">
+              <div class="admin-link-artist-header">
+                <h4>Привязать артист к Telegram аккаунту</h4>
+                <p class="muted">
+                  Если вы зарегистрировались с новым Telegram аккаунтом, но у вас уже есть артист,
+                  вы можете привязать его к текущему аккаунту. Все данные (треки, подписчики, оценки) будут перенесены.
+                </p>
+              </div>
+
+              <form id="link-artist-form" class="admin-link-artist-form">
+                <div class="field">
+                  <label for="link-telegram-id">Telegram ID (будет привязан)</label>
+                  <input
+                    id="link-telegram-id"
+                    name="telegramId"
+                    type="text"
+                    placeholder="Telegram ID, например: 754409747"
+                    required
+                  />
+                  <span class="field-help">Этот Telegram аккаунт получит все данные артиста</span>
+                </div>
+
+                <div class="field">
+                  <label for="link-artist-nickname">Никнейм артиста (откуда забрать данные)</label>
+                  <input
+                    id="link-artist-nickname"
+                    name="artistNickname"
+                    type="text"
+                    placeholder="Никнейм артиста, например: asd"
+                    required
+                  />
+                  <span class="field-help">Никнейм существующего артиста, чьи данные нужно перенести</span>
+                </div>
+
+                <div class="cta-row">
+                  <button class="btn" type="submit">Привязать артиста</button>
+                </div>
+              </form>
+
+              <div class="admin-link-artist-info">
+                <h5>Как это работает:</h5>
+                <ol>
+                  <li>Найдите никнейм артиста, чьи данные нужно перенести (вкладка "Все пользователи")</li>
+                  <li>Введите Telegram ID аккаунта, к которому нужно привязать артиста</li>
+                  <li>Введите никнейм артиста</li>
+                  <li>Нажмите "Привязать артиста"</li>
+                </ol>
+                <p class="muted">
+                  <strong>Важно:</strong> Старый пользователь будет удалён, а все его данные (треки, подписчики, оценки) 
+                  будут перенесены на новый Telegram аккаунт.
+                </p>
+              </div>
+            </section>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <div id="toast" class="toast"></div>
+
+    <script type="module" src="/admin.js?v=admin-panel-1"></script>
+  </body>
+</html>

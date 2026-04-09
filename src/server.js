@@ -4,18 +4,25 @@ import { createServer } from 'node:http';
 import { authenticateRequest } from './auth.js';
 import { config } from './config.js';
 import {
-  addSupportMessage,
+  addAdmin,
   addComment,
+  addSupportMessage,
   createTrack,
   deleteTrack,
+  getAllUsers,
+  getAdminUsers,
   getArtistProfile,
   getBootstrapData,
   getSupportMessages,
   getUserById,
+  isUserAdmin,
+  linkArtistToTelegram,
   registerUser,
+  removeAdmin,
   searchCatalog,
   toggleFollow,
   toggleLike,
+  transferArtistData,
   updateProfile,
   upsertRating,
   upsertTelegramUser,
@@ -362,6 +369,90 @@ async function handleApiRequest(req, res, pathname, sessionUser) {
       ok: true,
       ...toggleFollow(sessionUser.id, followMatch[1]),
     });
+    return;
+  }
+
+  // Admin API endpoints
+  if (req.method === 'GET' && pathname === '/api/admin/users') {
+    if (!sessionUser.isAdmin) {
+      throw httpError(403, 'Доступ запрещён.');
+    }
+
+    const url = new URL(req.url, config.appBaseUrl);
+    const limit = Number(url.searchParams.get('limit') || '50');
+    const offset = Number(url.searchParams.get('offset') || '0');
+
+    const users = getAllUsers({ limit: Math.min(limit, 100), offset });
+    sendJson(res, 200, { users });
+    return;
+  }
+
+  if (req.method === 'GET' && pathname === '/api/admin/users/admins') {
+    if (!sessionUser.isAdmin) {
+      throw httpError(403, 'Доступ запрещён.');
+    }
+
+    const admins = getAdminUsers();
+    sendJson(res, 200, { admins });
+    return;
+  }
+
+  const adminAddMatch = pathname.match(/^\/api\/admin\/users\/(\d+)\/admin$/);
+
+  if (req.method === 'POST' && adminAddMatch) {
+    if (!sessionUser.isAdmin) {
+      throw httpError(403, 'Доступ запрещён.');
+    }
+
+    const result = addAdmin(adminAddMatch[1]);
+    sendJson(res, 200, result);
+    return;
+  }
+
+  const adminRemoveMatch = pathname.match(/^\/api\/admin\/users\/(\d+)\/admin$/);
+
+  if (req.method === 'DELETE' && adminRemoveMatch) {
+    if (!sessionUser.isAdmin) {
+      throw httpError(403, 'Доступ запрещён.');
+    }
+
+    const result = removeAdmin(adminRemoveMatch[1]);
+    sendJson(res, 200, result);
+    return;
+  }
+
+  if (req.method === 'GET' && pathname === '/api/admin/check') {
+    sendJson(res, 200, {
+      isAdmin: sessionUser.isAdmin,
+      user: sessionUser.isAdmin ? {
+        id: sessionUser.id,
+        displayName: sessionUser.displayName,
+        telegramId: sessionUser.telegramId,
+        username: sessionUser.username,
+      } : null,
+    });
+    return;
+  }
+
+  if (req.method === 'POST' && pathname === '/api/admin/link-artist') {
+    if (!sessionUser.isAdmin) {
+      throw httpError(403, 'Доступ запрещён.');
+    }
+
+    const body = await readJson(req, config.maxJsonBytes);
+    const result = linkArtistToTelegram(body.telegramId, body.artistNickname);
+    sendJson(res, 200, result);
+    return;
+  }
+
+  if (req.method === 'POST' && pathname === '/api/admin/transfer-artist') {
+    if (!sessionUser.isAdmin) {
+      throw httpError(403, 'Доступ запрещён.');
+    }
+
+    const body = await readJson(req, config.maxJsonBytes);
+    const result = transferArtistData(body.fromUserId, body.toUserId);
+    sendJson(res, 200, result);
     return;
   }
 

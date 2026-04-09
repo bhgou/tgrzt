@@ -982,6 +982,7 @@ function renderProfileView() {
         <p class="track-description">${escapeHtml(state.me.bio || introCopy)}</p>
         ${renderProfileStats(state.me)}
         <div class="cta-row">
+          ${state.me.isAdmin ? '<button class="btn-secondary" onclick="window.location.href=\'/admin.html\'">Открыть админ-панель</button>' : ''}
           ${state.me.isAdmin ? '<span class="pill">Можно удалять запрещённый контент</span>' : ''}
           <button class="btn-ghost" data-action="logout">Выйти из профиля</button>
         </div>
