@@ -83,36 +83,6 @@ db.exec(`
     created_at TEXT NOT NULL
   );
 
-  CREATE TABLE IF NOT EXISTS invites (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    inviter_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    invitee_id INTEGER NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
-    bonus_track_id INTEGER REFERENCES tracks(id) ON DELETE SET NULL,
-    bonus_plays INTEGER NOT NULL DEFAULT 0,
-    created_at TEXT NOT NULL
-  );
-
-  CREATE TABLE IF NOT EXISTS track_reposts (
-    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    track_id INTEGER NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
-    created_at TEXT NOT NULL,
-    PRIMARY KEY (user_id, track_id)
-  );
-
-  CREATE TABLE IF NOT EXISTS track_play_bonuses (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    track_id INTEGER NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
-    bonus INTEGER NOT NULL,
-    reason TEXT NOT NULL DEFAULT '',
-    created_at TEXT NOT NULL
-  );
-
-  CREATE TABLE IF NOT EXISTS weekly_summaries (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    week_start TEXT NOT NULL UNIQUE,
-    posted_at TEXT NOT NULL
-  );
-
   CREATE INDEX IF NOT EXISTS idx_tracks_owner_id ON tracks (owner_id);
   CREATE INDEX IF NOT EXISTS idx_tracks_created_at ON tracks (created_at DESC);
   CREATE INDEX IF NOT EXISTS idx_comments_track_id ON comments (track_id, created_at DESC);
@@ -122,18 +92,7 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_track_plays_track_id ON track_plays (track_id, created_at DESC);
   CREATE INDEX IF NOT EXISTS idx_track_plays_user_id ON track_plays (user_id, created_at DESC);
   CREATE INDEX IF NOT EXISTS idx_support_messages_user_id ON support_messages (user_id, created_at ASC);
-  CREATE INDEX IF NOT EXISTS idx_track_reposts_track_id ON track_reposts (track_id);
-  CREATE INDEX IF NOT EXISTS idx_track_play_bonuses_track_id ON track_play_bonuses (track_id);
-  CREATE INDEX IF NOT EXISTS idx_invites_inviter_id ON invites (inviter_id);
 `);
-
-{
-  const cols = db.prepare('PRAGMA table_info(users)').all();
-  if (!cols.some((c) => c.name === 'invite_code')) {
-    db.exec(`ALTER TABLE users ADD COLUMN invite_code TEXT`);
-  }
-  db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_invite_code ON users (invite_code)`);
-}
 
 const userColumns = db.prepare('PRAGMA table_info(users)').all();
 
@@ -184,7 +143,6 @@ function mapUserRecord(row) {
     playsCount: Number(row.plays_count ?? 0),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
-    inviteCode: row.invite_code ?? null,
   };
 }
 
@@ -207,7 +165,6 @@ function mapArtistRecord(row) {
     playsCount: Number(row.plays_count ?? 0),
     monthlyPlaysCount: Number(row.monthly_plays_count ?? 0),
     isFollowing: Boolean(row.is_following),
-    topTrackMp3Path: row.top_track_mp3_path ?? null,
   };
 }
 
@@ -227,9 +184,7 @@ function mapTrackRow(row, viewerId) {
     likesCount: Number(row.likes_count ?? 0),
     commentsCount: Number(row.comments_count ?? 0),
     playsCount: Number(row.plays_count ?? 0),
-    repostsCount: Number(row.reposts_count ?? 0),
     isLiked: Boolean(row.is_liked),
-    isReposted: Boolean(row.is_reposted),
     userRating: Number(row.user_rating ?? 0),
     isFollowingArtist: Boolean(row.is_following_artist),
     isOwnTrack: Number(row.owner_id) === Number(viewerId),
@@ -265,7 +220,6 @@ function getUserSelect() {
       u.avatar_path,
       u.role,
       u.is_registered,
-      u.invite_code,
       u.created_at,
       u.updated_at,
       COALESCE((SELECT COUNT(*) FROM tracks t WHERE t.owner_id = u.id), 0) AS tracks_count,
@@ -276,11 +230,6 @@ function getUserSelect() {
         SELECT COUNT(*)
         FROM track_plays tp
         JOIN tracks t ON t.id = tp.track_id
-        WHERE t.owner_id = u.id
-      ), 0) + COALESCE((
-        SELECT SUM(bonus)
-        FROM track_play_bonuses tpb
-        JOIN tracks t ON t.id = tpb.track_id
         WHERE t.owner_id = u.id
       ), 0) AS plays_count
     FROM users u
@@ -490,10 +439,8 @@ function selectTracks(viewerId, options = {}) {
         COALESCE(r.ratings_count, 0) AS ratings_count,
         COALESCE(l.likes_count, 0) AS likes_count,
         COALESCE(c.comments_count, 0) AS comments_count,
-        (COALESCE(p.plays_count, 0) + COALESCE(b.bonus_count, 0)) AS plays_count,
-        COALESCE(rp.reposts_count, 0) AS reposts_count,
+        COALESCE(p.plays_count, 0) AS plays_count,
         EXISTS(SELECT 1 FROM likes l2 WHERE l2.track_id = t.id AND l2.user_id = :viewerId) AS is_liked,
-        EXISTS(SELECT 1 FROM track_reposts rp2 WHERE rp2.track_id = t.id AND rp2.user_id = :viewerId) AS is_reposted,
         COALESCE((SELECT score FROM ratings r2 WHERE r2.track_id = t.id AND r2.user_id = :viewerId), 0) AS user_rating,
         EXISTS(SELECT 1 FROM follows f2 WHERE f2.artist_id = t.owner_id AND f2.follower_id = :viewerId) AS is_following_artist
       FROM tracks t
@@ -518,16 +465,6 @@ function selectTracks(viewerId, options = {}) {
         FROM track_plays
         GROUP BY track_id
       ) p ON p.track_id = t.id
-      LEFT JOIN (
-        SELECT track_id, SUM(bonus) AS bonus_count
-        FROM track_play_bonuses
-        GROUP BY track_id
-      ) b ON b.track_id = t.id
-      LEFT JOIN (
-        SELECT track_id, COUNT(*) AS reposts_count
-        FROM track_reposts
-        GROUP BY track_id
-      ) rp ON rp.track_id = t.id
       WHERE ${whereClause}
       ORDER BY ${orderBy}
       LIMIT :limit
@@ -732,36 +669,14 @@ export function getTopArtists(viewerId, limit = 8) {
         FROM track_plays tp
         JOIN tracks t ON t.id = tp.track_id
         WHERE t.owner_id = u.id
-      ), 0) + COALESCE((
-        SELECT SUM(bonus)
-        FROM track_play_bonuses tpb
-        JOIN tracks t ON t.id = tpb.track_id
-        WHERE t.owner_id = u.id
       ), 0) AS plays_count,
       COALESCE((
         SELECT COUNT(*)
         FROM track_plays tp
         JOIN tracks t ON t.id = tp.track_id
         WHERE t.owner_id = u.id AND tp.created_at >= :monthAgo
-      ), 0) + COALESCE((
-        SELECT SUM(bonus)
-        FROM track_play_bonuses tpb
-        JOIN tracks t ON t.id = tpb.track_id
-        WHERE t.owner_id = u.id AND tpb.created_at >= :monthAgo
       ), 0) AS monthly_plays_count,
-      EXISTS(SELECT 1 FROM follows f2 WHERE f2.artist_id = u.id AND f2.follower_id = :viewerId) AS is_following,
-      (
-        SELECT t.mp3_path FROM tracks t
-        LEFT JOIN (
-          SELECT track_id, COUNT(*) AS cnt FROM track_plays GROUP BY track_id
-        ) tp ON tp.track_id = t.id
-        LEFT JOIN (
-          SELECT track_id, SUM(bonus) AS bcnt FROM track_play_bonuses GROUP BY track_id
-        ) tpb ON tpb.track_id = t.id
-        WHERE t.owner_id = u.id
-        ORDER BY (COALESCE(tp.cnt, 0) + COALESCE(tpb.bcnt, 0)) DESC
-        LIMIT 1
-      ) AS top_track_mp3_path
+      EXISTS(SELECT 1 FROM follows f2 WHERE f2.artist_id = u.id AND f2.follower_id = :viewerId) AS is_following
     FROM users u
     WHERE u.role = 'artist' AND u.is_registered = 1
     ORDER BY monthly_plays_count DESC, plays_count DESC, followers_count DESC, tracks_count DESC, u.created_at DESC
@@ -1166,271 +1081,4 @@ export function deleteTrack(actorUserId, trackId) {
     mp3Path: track.mp3_path,
     deletedAsAdmin: Boolean(actor.isAdmin && Number(track.owner_id) !== Number(actorUserId)),
   };
-}
-
-// ========================== INVITES ==========================
-
-function generateInviteCodeString() {
-  // 8 symbols, base36
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-  let code = '';
-  for (let i = 0; i < 8; i += 1) {
-    code += chars[Math.floor(Math.random() * chars.length)];
-  }
-  return code;
-}
-
-export function ensureUserInviteCode(userId) {
-  const user = getUserById(userId);
-  if (!user) throw httpError(404, 'Пользователь не найден.');
-  if (user.inviteCode) return user.inviteCode;
-
-  for (let attempt = 0; attempt < 12; attempt += 1) {
-    const code = generateInviteCodeString();
-    try {
-      db.prepare('UPDATE users SET invite_code = :code WHERE id = :userId').run({
-        code,
-        userId: Number(userId),
-      });
-      return code;
-    } catch (error) {
-      if (!String(error?.message || '').includes('UNIQUE')) throw error;
-    }
-  }
-  throw httpError(500, 'Не удалось создать invite-код.');
-}
-
-export function getInviteStats(userId) {
-  const code = ensureUserInviteCode(userId);
-  const invited = db
-    .prepare('SELECT COUNT(*) AS c FROM invites WHERE inviter_id = :userId')
-    .get({ userId: Number(userId) });
-  const bonus = db
-    .prepare(`
-      SELECT COALESCE(SUM(bonus_plays), 0) AS total_bonus
-      FROM invites WHERE inviter_id = :userId
-    `)
-    .get({ userId: Number(userId) });
-  return {
-    code,
-    invitedCount: Number(invited?.c ?? 0),
-    totalBonusPlays: Number(bonus?.total_bonus ?? 0),
-  };
-}
-
-export function claimInvite(newUserId, inviteCode) {
-  const cleanCode = String(inviteCode || '').trim().toUpperCase();
-  if (!cleanCode) throw httpError(400, 'Invite-код пуст.');
-
-  const inviter = db
-    .prepare('SELECT id FROM users WHERE invite_code = :code')
-    .get({ code: cleanCode });
-
-  if (!inviter) throw httpError(404, 'Invite-код не найден.');
-  if (Number(inviter.id) === Number(newUserId)) {
-    throw httpError(400, 'Нельзя активировать собственный invite-код.');
-  }
-
-  const already = db
-    .prepare('SELECT id FROM invites WHERE invitee_id = :newUserId')
-    .get({ newUserId: Number(newUserId) });
-  if (already) {
-    return { ok: false, reason: 'already_claimed' };
-  }
-
-  // Find inviter's most recent track
-  const track = db
-    .prepare('SELECT id FROM tracks WHERE owner_id = :ownerId ORDER BY created_at DESC LIMIT 1')
-    .get({ ownerId: Number(inviter.id) });
-
-  const bonusPlays = track ? 50 : 0;
-  const now = nowIso();
-
-  db.prepare(`
-    INSERT INTO invites (inviter_id, invitee_id, bonus_track_id, bonus_plays, created_at)
-    VALUES (:inviterId, :inviteeId, :trackId, :bonus, :createdAt)
-  `).run({
-    inviterId: Number(inviter.id),
-    inviteeId: Number(newUserId),
-    trackId: track ? Number(track.id) : null,
-    bonus: bonusPlays,
-    createdAt: now,
-  });
-
-  if (track && bonusPlays > 0) {
-    db.prepare(`
-      INSERT INTO track_play_bonuses (track_id, bonus, reason, created_at)
-      VALUES (:trackId, :bonus, 'invite', :createdAt)
-    `).run({
-      trackId: Number(track.id),
-      bonus: bonusPlays,
-      createdAt: now,
-    });
-  }
-
-  return { ok: true, inviterId: Number(inviter.id), bonusPlays, trackId: track ? Number(track.id) : null };
-}
-
-// ========================== REPOSTS ==========================
-
-export function addTrackRepost(userId, trackId) {
-  const track = getTrackRecord(trackId);
-  if (Number(track.owner_id) === Number(userId)) {
-    throw httpError(400, 'Нельзя репостить собственный трек.');
-  }
-
-  const existing = db
-    .prepare('SELECT 1 FROM track_reposts WHERE user_id = :userId AND track_id = :trackId')
-    .get({ userId: Number(userId), trackId: Number(trackId) });
-
-  if (existing) {
-    return { ok: true, alreadyReposted: true };
-  }
-
-  db.prepare(`
-    INSERT INTO track_reposts (user_id, track_id, created_at)
-    VALUES (:userId, :trackId, :createdAt)
-  `).run({
-    userId: Number(userId),
-    trackId: Number(trackId),
-    createdAt: nowIso(),
-  });
-
-  return { ok: true, alreadyReposted: false };
-}
-
-// ========================== WEEKLY SUMMARY ==========================
-
-function weekAgoIso() {
-  return new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-}
-
-function currentWeekStart() {
-  const now = new Date();
-  const day = now.getUTCDay(); // 0=Sunday
-  const mondayDiff = day === 0 ? -6 : 1 - day;
-  const monday = new Date(now);
-  monday.setUTCDate(now.getUTCDate() + mondayDiff);
-  monday.setUTCHours(0, 0, 0, 0);
-  return monday.toISOString().slice(0, 10);
-}
-
-export function hasWeeklySummaryPosted(weekStart = currentWeekStart()) {
-  const row = db
-    .prepare('SELECT id FROM weekly_summaries WHERE week_start = :weekStart')
-    .get({ weekStart });
-  return Boolean(row);
-}
-
-export function markWeeklySummaryPosted(weekStart = currentWeekStart()) {
-  db.prepare(`
-    INSERT OR IGNORE INTO weekly_summaries (week_start, posted_at)
-    VALUES (:weekStart, :postedAt)
-  `).run({ weekStart, postedAt: nowIso() });
-}
-
-export function getWeeklySummary() {
-  const weekAgo = weekAgoIso();
-
-  const topTracks = db.prepare(`
-    SELECT
-      t.id, t.title, t.genre,
-      u.nickname, u.username, u.first_name, u.last_name,
-      (
-        COALESCE((SELECT COUNT(*) FROM track_plays tp WHERE tp.track_id = t.id AND tp.created_at >= :weekAgo), 0)
-        + COALESCE((SELECT SUM(bonus) FROM track_play_bonuses tpb WHERE tpb.track_id = t.id AND tpb.created_at >= :weekAgo), 0)
-      ) AS week_plays
-    FROM tracks t
-    JOIN users u ON u.id = t.owner_id
-    WHERE u.role = 'artist' AND u.is_registered = 1
-    ORDER BY week_plays DESC, t.created_at DESC
-    LIMIT 3
-  `).all({ weekAgo });
-
-  const totalPlaysRow = db.prepare(`
-    SELECT
-      (
-        COALESCE((SELECT COUNT(*) FROM track_plays WHERE created_at >= :weekAgo), 0)
-        + COALESCE((SELECT SUM(bonus) FROM track_play_bonuses WHERE created_at >= :weekAgo), 0)
-      ) AS total
-  `).get({ weekAgo });
-
-  const randomTrack = db.prepare(`
-    SELECT t.id, t.title,
-      u.nickname, u.username, u.first_name, u.last_name
-    FROM tracks t
-    JOIN users u ON u.id = t.owner_id
-    WHERE u.role = 'artist' AND u.is_registered = 1
-    ORDER BY RANDOM()
-    LIMIT 1
-  `).get();
-
-  return {
-    weekStart: currentWeekStart(),
-    topTracks: topTracks.map((row) => ({
-      id: Number(row.id),
-      title: row.title,
-      genre: row.genre,
-      weekPlays: Number(row.week_plays ?? 0),
-      artistName: buildDisplayName({
-        nickname: row.nickname,
-        firstName: row.first_name,
-        lastName: row.last_name,
-        username: row.username,
-      }),
-    })),
-    totalPlays: Number(totalPlaysRow?.total ?? 0),
-    editorsPick: randomTrack
-      ? {
-          id: Number(randomTrack.id),
-          title: randomTrack.title,
-          artistName: buildDisplayName({
-            nickname: randomTrack.nickname,
-            firstName: randomTrack.first_name,
-            lastName: randomTrack.last_name,
-            username: randomTrack.username,
-          }),
-        }
-      : null,
-  };
-}
-
-// ====== TOP INVITERS (для бегущей ленты слева) ======
-export function getTopInviters(limit = 20) {
-  const rows = db
-    .prepare(
-      `
-        SELECT
-          u.id,
-          u.nickname,
-          u.username,
-          u.first_name,
-          u.last_name,
-          u.avatar_path,
-          u.role,
-          COUNT(i.id) AS invite_count
-        FROM users u
-        JOIN invites i ON i.inviter_id = u.id
-        WHERE u.is_registered = 1
-        GROUP BY u.id
-        HAVING invite_count > 0
-        ORDER BY invite_count DESC, MAX(i.created_at) DESC
-        LIMIT :limit
-      `,
-    )
-    .all({ limit: Number(limit) || 20 });
-
-  return rows.map((row) => ({
-    id: Number(row.id),
-    nickname: row.nickname,
-    role: row.role,
-    avatarPath: row.avatar_path || null,
-    inviteCount: Number(row.invite_count ?? 0),
-    displayName: buildDisplayName({
-      nickname: row.nickname,
-      firstName: row.first_name,
-      lastName: row.last_name,
-      username: row.username,
-    }),
-  }));
 }

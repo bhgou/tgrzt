@@ -1,4 +1,5 @@
 import { setTimeout as delay } from 'node:timers/promises';
+import { getWeeklySummary, hasWeeklySummaryPosted, markWeeklySummaryPosted } from './database.js';
 
 export class TelegramBotService {
   constructor(config) {
@@ -6,6 +7,7 @@ export class TelegramBotService {
     this.offset = 0;
     this.running = false;
     this.botInfo = null;
+    this.weeklyCronTimer = null;
   }
 
   async api(method, payload = {}) {
@@ -144,9 +146,77 @@ export class TelegramBotService {
     await this.syncCommands();
     console.log(`[telegram] connected as @${this.botInfo.username}`);
     void this.pollLoop();
+    this.startWeeklyCron();
   }
 
   stop() {
     this.running = false;
+    if (this.weeklyCronTimer) {
+      clearInterval(this.weeklyCronTimer);
+      this.weeklyCronTimer = null;
+    }
+  }
+
+  // ============== WEEKLY SUMMARY ==============
+
+  formatWeeklySummaryText(summary) {
+    const lines = [];
+    lines.push('📊 Итоги недели на Demo Stage');
+    lines.push('');
+    if (summary.topTracks.length) {
+      lines.push('🏆 Топ-3 трека недели:');
+      summary.topTracks.forEach((track, index) => {
+        const medal = ['🥇', '🥈', '🥉'][index] || `${index + 1}.`;
+        lines.push(`${medal} «${track.title}» — ${track.artistName} (${track.weekPlays} прослушиваний)`);
+      });
+    } else {
+      lines.push('На этой неделе пока тихо — треков не прослушали.');
+    }
+    lines.push('');
+    lines.push(`🎧 Всего за неделю: ${summary.totalPlays} прослушиваний`);
+    if (summary.editorsPick) {
+      lines.push('');
+      lines.push(`✨ Выбор редакции: «${summary.editorsPick.title}» — ${summary.editorsPick.artistName}`);
+    }
+    return lines.join('\n');
+  }
+
+  async sendWeeklySummary(summary = null) {
+    if (!this.config.channelId) {
+      return { ok: false, error: 'CHANNEL_ID не настроен.' };
+    }
+    const data = summary || getWeeklySummary();
+    const text = this.formatWeeklySummaryText(data);
+    await this.api('sendMessage', {
+      chat_id: this.config.channelId,
+      text,
+      disable_web_page_preview: true,
+    });
+    return { ok: true };
+  }
+
+  startWeeklyCron() {
+    if (this.weeklyCronTimer || !this.config.channelId) return;
+    // Check every hour — auto-post on Sunday at 18:00 UTC (configurable later)
+    const tick = async () => {
+      try {
+        const now = new Date();
+        const isSunday = now.getUTCDay() === 0;
+        const hour = now.getUTCHours();
+        if (!isSunday || hour < 18) return;
+        if (hasWeeklySummaryPosted()) return;
+        const summary = getWeeklySummary();
+        const result = await this.sendWeeklySummary(summary);
+        if (result.ok) {
+          markWeeklySummaryPosted(summary.weekStart);
+          console.log('[telegram] weekly summary posted for week', summary.weekStart);
+        }
+      } catch (error) {
+        console.error('[telegram] weekly cron error:', error.message);
+      }
+    };
+    this.weeklyCronTimer = setInterval(tick, 60 * 60 * 1000);
+    // Запустим сразу при старте (на случай пропущенного воскресенья)
+    setTimeout(tick, 5_000).unref?.();
   }
 }

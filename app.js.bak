@@ -21,10 +21,6 @@ const state = {
   latestTracks: [],
   topArtists: [],
   platformStats: null,
-  inviteCode: null,
-  botUsername: '',
-  pendingInviteCode: null,
-  topInviters: [],
   searchQuery: '',
   searchResults: {
     artists: [],
@@ -35,24 +31,6 @@ const state = {
     botConfigured: false,
   },
 };
-
-// Extract invite code from Telegram start_param or URL ?invite=
-(function extractInviteCode() {
-  try {
-    const tgParam = tg?.initDataUnsafe?.start_param;
-    if (tgParam) {
-      state.pendingInviteCode = String(tgParam).trim();
-      return;
-    }
-  } catch (_e) {}
-  try {
-    const url = new URL(window.location.href);
-    const fromQuery = url.searchParams.get('invite') || url.searchParams.get('startapp');
-    if (fromQuery) {
-      state.pendingInviteCode = String(fromQuery).trim();
-    }
-  } catch (_e) {}
-})();
 
 const elements = {
   app: document.querySelector('#app'),
@@ -270,25 +248,6 @@ async function loadBootstrap(options = {}) {
 
   state.loading = false;
   render();
-  mountInviteMarquee();
-
-  // Auto-claim pending invite after bootstrap loaded
-  if (state.pendingInviteCode && state.me?.isRegistered) {
-    const code = state.pendingInviteCode;
-    state.pendingInviteCode = null;
-    try {
-      const result = await api('/api/invite/claim', {
-        method: 'POST',
-        body: JSON.stringify({ code }),
-        headers: { 'Content-Type': 'application/json' },
-      });
-      if (result.ok) {
-        showToast('Invite активирован! Автор поднимется в стене инвайтеров.');
-      }
-    } catch (error) {
-      console.warn('[invite] claim failed:', error.message);
-    }
-  }
 }
 
 async function runSearch(query, options = {}) {
@@ -451,10 +410,15 @@ function renderArtistCard(artist) {
 
 function renderComment(comment) {
   return `
-    <div class="comment-item">
-      <span class="comment-author">${escapeHtml(comment.user.displayName)}</span>
-      <span class="comment-date muted">${formatDate(comment.createdAt)}</span>
-      <p class="comment-text">${escapeHtml(comment.body)}</p>
+    <div class="comment">
+      <div class="comment-head">
+        ${renderAvatar(comment.user, 'avatar avatar-sm')}
+        <div class="meta-col">
+          <strong>${escapeHtml(comment.user.displayName)}</strong>
+          <span class="muted">${formatDate(comment.createdAt)}</span>
+        </div>
+      </div>
+      <p>${escapeHtml(comment.body)}</p>
     </div>
   `;
 }
@@ -468,11 +432,14 @@ function renderTrackCard(track) {
 
   return `
     <article class="track-card">
+      <div class="cover-art" style="background: ${coverGradient(track.id)};">
+        <span class="cover-badge">${escapeHtml(track.genre || 'Demo tape')}</span>
+      </div>
+
       <div class="track-head">
         <div>
           <p class="eyebrow">${formatDate(track.createdAt) || 'Свежий релиз'}</p>
           <h4>${escapeHtml(track.title)}</h4>
-          <span class="pill pill-genre">${escapeHtml(track.genre || 'Demo tape')}</span>
         </div>
         <span class="rating-pill">${formatRating(track.averageRating)} / 10</span>
       </div>
@@ -504,7 +471,6 @@ function renderTrackCard(track) {
         <span class="pill">${track.ratingsCount} оценок</span>
         <span class="pill">${track.likesCount} лайков</span>
         <span class="pill">${track.commentsCount} комментариев</span>
-        <span class="pill pill-repost">🔁 ${track.repostsCount || 0}</span>
       </div>
 
       <p class="track-description">${escapeHtml(track.description || 'Автор ждёт честный фидбек по демке.')}</p>
@@ -520,16 +486,6 @@ function renderTrackCard(track) {
           ${track.isOwnTrack ? 'disabled' : ''}
         >
           ${track.isLiked ? 'Убрать лайк' : 'Лайкнуть'}
-        </button>
-        <button
-          class="btn-ghost btn-repost"
-          data-action="repost-track"
-          data-track-id="${track.id}"
-          data-track-title="${escapeHtml(track.title)}"
-          data-artist-name="${escapeHtml(track.artist.displayName)}"
-          ${track.isOwnTrack ? 'disabled' : ''}
-        >
-          ${track.isReposted ? '🔁 Репостнуто (+1)' : '🔁 Репост для голоса'}
         </button>
         <a class="btn-ghost" href="${track.wavUrl}" download>Скачать WAV</a>
         ${
@@ -555,18 +511,16 @@ function renderTrackCard(track) {
         </button>
       </form>
 
-      <details class="comments-toggle">
-        <summary>Комментарии (${track.commentsCount})</summary>
-        <div class="comment-list">
-          ${track.comments.length ? track.comments.map(renderComment).join('') : '<p class="muted" style="margin:8px 0 0">Пока без комментариев</p>'}
-        </div>
-      </details>
+      <div class="comment-list">
+        ${track.comments.length ? track.comments.map(renderComment).join('') : '<div class="empty-state"><strong>Пока без комментариев</strong><span class="muted">Оставь первый фидбек по этому треку.</span></div>'}
+      </div>
 
       <form class="inline-form" data-form="comment" data-track-id="${track.id}">
         <div class="field">
-          <textarea name="body" placeholder="Оставь фидбек по треку..." maxlength="280"></textarea>
+          <label>Комментарий</label>
+          <textarea name="body" placeholder="Напиши, что с вокалом, аранжировкой, сведением или хитом." maxlength="280"></textarea>
         </div>
-        <button class="btn">Отправить</button>
+        <button class="btn">Оставить комментарий</button>
       </form>
     </article>
   `;
@@ -673,6 +627,7 @@ function renderCompactTrackCard(track, options = {}) {
 
   return `
     <article class="compact-track-card">
+      <div class="compact-track-art" style="background: ${coverGradient(track.id)};"></div>
       <div class="compact-track-main">
         <div class="compact-track-head">
           <div class="meta-col">
@@ -758,26 +713,16 @@ function renderArtistsSection(title, subtitle, artists) {
 }
 
 function renderTopArtistCard(artist, index) {
-  const audioBlock = artist.topTrackMp3Url
-    ? `<audio class="artist-top-audio" src="${artist.topTrackMp3Url}" preload="none"></audio>
-       <button class="play-overlay" type="button" data-action="toggle-artist-top-track" data-artist-id="${artist.id}" aria-label="Слушать топ-трек">▶</button>`
-    : '';
-
   return `
     <article class="top-artist-card">
-      <div class="top-artist-head">
-        <div class="artist-avatar-play">
-          ${renderAvatar(artist, 'avatar avatar-xl')}
-          ${audioBlock}
-        </div>
-        <button class="artist-link" data-action="open-artist" data-artist-id="${artist.id}">
-          <span class="top-rank">#${index + 1}</span>
-          <span class="meta-col">
-            <strong>${escapeHtml(artist.displayName)}</strong>
-            <span class="muted">@${escapeHtml(artist.nickname || artist.username || 'artist')}</span>
-          </span>
-        </button>
-      </div>
+      <button class="artist-link" data-action="open-artist" data-artist-id="${artist.id}">
+        <span class="top-rank">#${index + 1}</span>
+        ${renderAvatar(artist, 'avatar avatar-xl')}
+        <span class="meta-col">
+          <strong>${escapeHtml(artist.displayName)}</strong>
+          <span class="muted">@${escapeHtml(artist.nickname || artist.username || 'artist')}</span>
+        </span>
+      </button>
       <div class="badge-row">
         <span class="pill">${formatFollowers(artist.monthlyPlaysCount)} за месяц</span>
         <span class="pill">${formatFollowers(artist.playsCount)} всего</span>
@@ -843,8 +788,8 @@ function renderArtistRowsSection(artists) {
     <section class="panel compact-panel">
       <div class="section-head">
         <div>
-          <p class="eyebrow">Popular artists</p>
-          <h3>Популярные артисты</h3>
+          <p class="eyebrow">Next artists</p>
+          <h3>Ещё артисты</h3>
         </div>
       </div>
       <div class="artist-list">${artists.map(renderArtistListCard).join('')}</div>
@@ -958,15 +903,19 @@ function renderProfileStats(user) {
 
 function renderHomeView() {
   const topArtists = state.topArtists.slice(0, 5);
-  const popularArtists = state.topArtists.slice(5);
+  const nextArtists = state.topArtists.slice(5);
   const latestSection = state.latestTracks.length
-    ? renderCompactTracksSection('Недавние релизы', state.latestTracks, 'Пока нет свежих треков', { showArtist: true })
+    ? renderTracksSection('Свежие релизы', 'Latest drops', state.latestTracks, 'Пока нет свежих треков')
+    : '';
+  const ratingSection = state.featuredTracks.length
+    ? renderTracksSection('Рейтинг сообщества', 'Top score', state.featuredTracks, 'Пока нет оценённых треков')
     : '';
 
   return `
     ${renderTopArtistsSection(topArtists)}
+    ${renderArtistRowsSection(nextArtists)}
     ${latestSection}
-    ${renderArtistRowsSection(popularArtists)}
+    ${ratingSection}
   `;
 }
 
@@ -1216,10 +1165,6 @@ function renderProfileView() {
       </div>
     </section>
 
-    ${renderInvitePanel()}
-
-    ${state.me.isAdmin ? renderAdminPanel() : ''}
-
     ${
       isArtist(state.me)
         ? renderCompactTracksSection('Релизы', state.me.ownTracks, 'Ты ещё не загрузил ни одного релиза', { showArtist: false })
@@ -1227,114 +1172,6 @@ function renderProfileView() {
     }
 
     ${renderCompactTracksSection('Лайкнутые треки', state.me.likedTracks, 'Ты пока не лайкнул ни одного трека', { showArtist: true })}
-  `;
-}
-
-function buildInviteLink() {
-  const code = state.inviteCode;
-  if (!code) return '';
-  if (state.botUsername) {
-    return `https://t.me/${state.botUsername}/app?startapp=${code}`;
-  }
-  return `${window.location.origin}/?invite=${code}`;
-}
-
-function renderInvitePanel() {
-  if (!state.me?.isRegistered || !state.inviteCode) return '';
-  const link = buildInviteLink();
-  return `
-    <section class="panel invite-panel">
-      <div class="section-head">
-        <div>
-          <p class="eyebrow">Wall of inviters</p>
-          <h3>Приглашай — попади на стену признания</h3>
-        </div>
-      </div>
-      <p class="muted">За каждого друга по твоей ссылке твой аватар появляется в бегущей ленте слева — её видит каждый, кто открыл Demo Stage. Чем больше инвайтов, тем выше ты в ленте.</p>
-      <div class="invite-link-box">
-        <code class="invite-link">${escapeHtml(link)}</code>
-        <button class="btn-secondary" data-action="copy-invite" data-invite-link="${escapeHtml(link)}">Скопировать</button>
-        <button class="btn" data-action="share-invite" data-invite-link="${escapeHtml(link)}">Поделиться</button>
-      </div>
-      <div class="badge-row">
-        <span class="pill">Твой код: ${escapeHtml(state.inviteCode)}</span>
-      </div>
-    </section>
-  `;
-}
-
-// =================== INVITE MARQUEE ===================
-let _lastMarqueeKey = '';
-function mountInviteMarquee() {
-  const inviters = Array.isArray(state.topInviters) ? state.topInviters : [];
-  let host = document.getElementById('invite-marquee-host');
-
-  // ничего нет — снимаем
-  if (!inviters.length) {
-    if (host) host.remove();
-    _lastMarqueeKey = '';
-    document.body.classList.remove('has-invite-marquee');
-    return;
-  }
-
-  // ключ для memo: id+count, чтобы при тех же данных не пересоздавать
-  const key = inviters.map((i) => `${i.id}:${i.inviteCount}`).join('|');
-  if (host && key === _lastMarqueeKey) return;
-  _lastMarqueeKey = key;
-
-  // дублируем список 2 раза для бесшовного цикла
-  const items = [...inviters, ...inviters].map(renderInviterChip).join('');
-
-  // длительность анимации зависит от количества (чтобы скорость была одинаковой)
-  const duration = Math.max(20, inviters.length * 4);
-
-  if (!host) {
-    host = document.createElement('aside');
-    host.id = 'invite-marquee-host';
-    host.className = 'invite-marquee';
-    host.setAttribute('aria-hidden', 'true');
-    document.body.appendChild(host);
-    document.body.classList.add('has-invite-marquee');
-  }
-
-  host.innerHTML = `
-    <div class="invite-marquee-track" style="--marquee-duration:${duration}s">
-      ${items}
-    </div>
-  `;
-}
-
-function renderInviterChip(inv) {
-  const initial = (inv.displayName || inv.nickname || '?').trim().charAt(0).toUpperCase();
-  const safeName = escapeHtml(inv.displayName || inv.nickname || 'Demo Artist');
-  const avatarInner = inv.avatarUrl
-    ? `<img src="${escapeHtml(inv.avatarUrl)}" alt="${safeName}" loading="lazy">`
-    : `<span class="invite-marquee-initial">${escapeHtml(initial)}</span>`;
-  return `
-    <div class="invite-marquee-item" title="${safeName} · +${inv.inviteCount}">
-      <div class="invite-marquee-avatar">
-        ${avatarInner}
-        <span class="invite-marquee-badge">+${inv.inviteCount}</span>
-      </div>
-      <span class="invite-marquee-name">${safeName}</span>
-    </div>
-  `;
-}
-
-function renderAdminPanel() {
-  return `
-    <section class="panel admin-panel">
-      <div class="section-head">
-        <div>
-          <p class="eyebrow">Admin tools</p>
-          <h3>Еженедельный итог</h3>
-        </div>
-      </div>
-      <p class="muted">Публикация топ-3 треков, общих прослушиваний и выбора редакции в канал (CHANNEL_ID из .env). Автоматически пушится каждое воскресенье 18:00 UTC, можно вручную.</p>
-      <div class="cta-row">
-        <button class="btn" data-action="post-weekly-summary">Отправить итог недели сейчас</button>
-      </div>
-    </section>
   `;
 }
 
@@ -1548,32 +1385,6 @@ document.addEventListener('click', async (event) => {
     return;
   }
 
-  if (action === 'toggle-artist-top-track') {
-    event.stopPropagation();
-    const wrapper = actionTarget.closest('.artist-avatar-play');
-    const audio = wrapper?.querySelector('.artist-top-audio');
-    if (!audio) return;
-    if (audio.paused) {
-      // Pause all other artist top audios
-      document.querySelectorAll('.artist-top-audio').forEach((a) => {
-        if (a !== audio) {
-          a.pause();
-          a.closest('.artist-avatar-play')?.classList.remove('is-playing');
-          const btn = a.closest('.artist-avatar-play')?.querySelector('.play-overlay');
-          if (btn) btn.textContent = '▶';
-        }
-      });
-      audio.play();
-      wrapper.classList.add('is-playing');
-      actionTarget.textContent = '⏸';
-    } else {
-      audio.pause();
-      wrapper.classList.remove('is-playing');
-      actionTarget.textContent = '▶';
-    }
-    return;
-  }
-
   if (action === 'delete-track') {
     const trackId = actionTarget.dataset.trackId;
     const confirmed = window.confirm('Удалить этот трек? Лайки, оценки и комментарии к нему тоже будут удалены.');
@@ -1585,65 +1396,6 @@ document.addEventListener('click', async (event) => {
     await withPending(async () => {
       await api(`/api/tracks/${trackId}`, { method: 'DELETE' });
       await refreshAfterMutation('Трек удалён.');
-    });
-    return;
-  }
-
-  if (action === 'repost-track') {
-    const trackId = actionTarget.dataset.trackId;
-    const trackTitle = actionTarget.dataset.trackTitle || 'трек';
-    const artistName = actionTarget.dataset.artistName || '';
-    await withPending(async () => {
-      const result = await api(`/api/tracks/${trackId}/repost`, { method: 'POST' });
-      const botUsername = state.botUsername || '';
-      const shareUrl = botUsername
-        ? `https://t.me/${botUsername}/app?startapp=track_${trackId}`
-        : `${window.location.origin}/?track=${trackId}`;
-      const shareText = `🎧 «${trackTitle}» — ${artistName}. Слушай на Demo Stage!`;
-      const tgShareLink = `https://t.me/share/url?url=${encodeURIComponent(shareUrl)}&text=${encodeURIComponent(shareText)}`;
-      if (tg?.openTelegramLink) {
-        tg.openTelegramLink(tgShareLink);
-      } else {
-        window.open(tgShareLink, '_blank');
-      }
-      await refreshAfterMutation(result?.alreadyReposted ? 'Уже репостнуто.' : 'Репост засчитан: +1 голос артисту.');
-    });
-    return;
-  }
-
-  if (action === 'copy-invite') {
-    const link = actionTarget.dataset.inviteLink || buildInviteLink();
-    try {
-      await navigator.clipboard.writeText(link);
-      showToast('Ссылка скопирована.');
-    } catch (_e) {
-      window.prompt('Скопируй ссылку:', link);
-    }
-    return;
-  }
-
-  if (action === 'share-invite') {
-    const link = actionTarget.dataset.inviteLink || buildInviteLink();
-    const shareText = 'Залетай в Demo Stage — мини-апп для демок и треков.';
-    const tgShareLink = `https://t.me/share/url?url=${encodeURIComponent(link)}&text=${encodeURIComponent(shareText)}`;
-    if (tg?.openTelegramLink) {
-      tg.openTelegramLink(tgShareLink);
-    } else {
-      window.open(tgShareLink, '_blank');
-    }
-    return;
-  }
-
-  if (action === 'post-weekly-summary') {
-    const confirmed = window.confirm('Отправить итог недели в канал сейчас?');
-    if (!confirmed) return;
-    await withPending(async () => {
-      const result = await api('/api/admin/weekly-summary', { method: 'POST' });
-      if (result?.posted?.ok === false) {
-        showToast('Ошибка отправки: ' + (result.posted.error || 'неизвестно'));
-      } else {
-        showToast('Итог недели отправлен в канал.');
-      }
     });
     return;
   }

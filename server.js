@@ -5,22 +5,14 @@ import { authenticateRequest } from './auth.js';
 import { config } from './config.js';
 import {
   addTrackPlay,
-  addTrackRepost,
   addSupportMessage,
   addComment,
-  claimInvite,
   createTrack,
   deleteTrack,
-  ensureUserInviteCode,
   getArtistProfile,
   getBootstrapData,
-  getInviteStats,
   getSupportMessages,
-  getTopInviters,
   getUserById,
-  getWeeklySummary,
-  hasWeeklySummaryPosted,
-  markWeeklySummaryPosted,
   registerUser,
   searchCatalog,
   toggleFollow,
@@ -48,7 +40,6 @@ function mapArtistForClient(artist) {
   return {
     ...artist,
     avatarUrl: artist.avatarPath ? toPublicMediaUrl(artist.avatarPath) : null,
-    topTrackMp3Url: artist.topTrackMp3Path ? toPublicMediaUrl(artist.topTrackMp3Path) : null,
   };
 }
 
@@ -126,21 +117,8 @@ async function parseProfilePayload(req, maxBytes) {
 async function handleApiRequest(req, res, pathname, sessionUser) {
   if (req.method === 'GET' && pathname === '/api/bootstrap') {
     const data = mapBootstrapForClient(getBootstrapData(sessionUser.id));
-    let inviteCode = null;
-    try {
-      inviteCode = ensureUserInviteCode(sessionUser.id);
-    } catch (_e) {
-      inviteCode = null;
-    }
-    const topInviters = getTopInviters(20).map((inv) => ({
-      ...inv,
-      avatarUrl: inv.avatarPath ? toPublicMediaUrl(inv.avatarPath) : null,
-    }));
     sendJson(res, 200, {
       ...data,
-      inviteCode,
-      topInviters,
-      botUsername: telegramBot.botInfo?.username || '',
       capabilities: {
         ffmpegReady,
         botConfigured: Boolean(config.botToken),
@@ -395,56 +373,6 @@ async function handleApiRequest(req, res, pathname, sessionUser) {
       ok: true,
       ...toggleFollow(sessionUser.id, followMatch[1]),
     });
-    return;
-  }
-
-  // ========== INVITES ==========
-
-  if (req.method === 'GET' && pathname === '/api/invite/me') {
-    const stats = getInviteStats(sessionUser.id);
-    const botUsername = telegramBot.botInfo?.username || '';
-    const inviteLink = botUsername
-      ? `https://t.me/${botUsername}/app?startapp=${stats.code}`
-      : `${config.appBaseUrl}?invite=${stats.code}`;
-    sendJson(res, 200, { ...stats, inviteLink, botUsername });
-    return;
-  }
-
-  if (req.method === 'POST' && pathname === '/api/invite/claim') {
-    const body = await readJson(req, config.maxJsonBytes);
-    const result = claimInvite(sessionUser.id, body.code);
-    sendJson(res, 200, { ok: result.ok, ...result });
-    return;
-  }
-
-  // ========== REPOSTS ==========
-
-  const repostMatch = pathname.match(/^\/api\/tracks\/(\d+)\/repost$/);
-
-  if (req.method === 'POST' && repostMatch) {
-    sendJson(res, 200, {
-      ok: true,
-      ...addTrackRepost(sessionUser.id, repostMatch[1]),
-    });
-    return;
-  }
-
-  // ========== WEEKLY SUMMARY (admin) ==========
-
-  if (req.method === 'POST' && pathname === '/api/admin/weekly-summary') {
-    const user = getUserById(sessionUser.id);
-    if (!user?.isAdmin) {
-      throw httpError(403, 'Только для админа.');
-    }
-    const summary = getWeeklySummary();
-    const posted = await telegramBot.sendWeeklySummary(summary).catch((error) => {
-      console.error('[weekly-summary]', error);
-      return { ok: false, error: error.message };
-    });
-    if (posted?.ok !== false) {
-      markWeeklySummaryPosted(summary.weekStart);
-    }
-    sendJson(res, 200, { ok: true, summary, posted });
     return;
   }
 

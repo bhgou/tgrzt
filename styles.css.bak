@@ -488,7 +488,7 @@ a {
 
 .compact-track-card {
   display: grid;
-  grid-template-columns: 1fr;
+  grid-template-columns: 104px minmax(0, 1fr);
   gap: 14px;
   padding: 14px;
   border-radius: 22px;
@@ -612,15 +612,6 @@ a {
   color: var(--muted);
 }
 
-.pill-genre {
-  margin-top: 6px;
-  font-size: 0.78rem;
-  min-height: 26px;
-  padding: 0 10px;
-  background: rgba(143, 108, 255, 0.15);
-  color: var(--accent-2);
-}
-
 .track-head {
   display: flex;
   align-items: flex-start;
@@ -669,65 +660,29 @@ audio {
   filter: saturate(1.12);
 }
 
-/* Comments — minimalist */
-.comments-toggle summary {
-  cursor: pointer;
-  font-size: 0.88rem;
-  color: var(--muted);
-  padding: 6px 0;
-  list-style: none;
-  user-select: none;
-}
-
-.comments-toggle summary::-webkit-details-marker {
-  display: none;
-}
-
-.comments-toggle summary::before {
-  content: '▸ ';
-  font-size: 0.75rem;
-}
-
-.comments-toggle[open] summary::before {
-  content: '▾ ';
-}
-
 .comment-list {
   display: grid;
-  gap: 0;
-  margin-top: 6px;
+  gap: 10px;
 }
 
-.comment-item {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  column-gap: 8px;
-  row-gap: 3px;
-  padding: 8px 0;
-  border-bottom: 1px solid rgba(198, 167, 255, 0.07);
+.comment {
+  padding: 12px 14px;
+  border-radius: 18px;
+  background: rgba(198, 167, 255, 0.055);
+  border: 1px solid rgba(198, 167, 255, 0.09);
 }
 
-.comment-item:last-child {
-  border-bottom: none;
+.comment-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
 }
 
-.comment-author {
-  font-weight: 600;
-  font-size: 0.82rem;
-  color: var(--accent-2);
-}
-
-.comment-date {
-  font-size: 0.78rem;
-  text-align: right;
-}
-
-.comment-text {
-  grid-column: 1 / -1;
+.comment p {
   margin: 0;
-  font-size: 0.88rem;
-  color: #ddd7f5;
-  line-height: 1.5;
+  color: #e0daf8;
+  line-height: 1.55;
 }
 
 .inline-form,
@@ -1001,66 +956,20 @@ audio {
   z-index: 1;
 }
 
-.top-artist-head {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-}
-
 .top-artist-card .artist-link {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex: 1;
+  display: grid;
+  gap: 13px;
 }
 
 .top-artist-card .meta-col strong {
-  font-size: 1.1rem;
+  font-size: 1.22rem;
 }
 
 .top-artist-card > p.muted {
   display: -webkit-box;
   overflow: hidden;
   -webkit-line-clamp: 2;
-  line-clamp: 2;
   -webkit-box-orient: vertical;
-}
-
-/* Artist avatar with play overlay */
-.artist-avatar-play {
-  position: relative;
-  display: inline-flex;
-  flex-shrink: 0;
-}
-
-.play-overlay {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(0, 0, 0, 0.4);
-  border-radius: 50%;
-  opacity: 0;
-  transition: opacity 0.18s;
-  font-size: 1rem;
-  color: #fff;
-  cursor: pointer;
-  border: none;
-  padding: 0;
-}
-
-.artist-avatar-play:hover .play-overlay {
-  opacity: 1;
-}
-
-.artist-avatar-play.is-playing .play-overlay {
-  opacity: 1;
-  background: rgba(143, 108, 255, 0.55);
-}
-
-.artist-top-audio {
-  display: none;
 }
 
 .top-rank,
@@ -1844,280 +1753,3 @@ audio {
     font-size: 0.64rem;
   }
 }
-
-/* ======= Invite panel ======= */
-.invite-panel {
-  background: linear-gradient(135deg, rgba(198, 167, 255, 0.08), rgba(198, 167, 255, 0.02));
-  border: 1px solid rgba(198, 167, 255, 0.18);
-}
-
-.invite-panel p {
-  margin: 6px 0;
-  color: var(--muted);
-  line-height: 1.5;
-}
-
-.invite-link-box {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  align-items: center;
-  margin-top: 14px;
-  padding: 10px 12px;
-  border-radius: 14px;
-  background: rgba(10, 8, 22, 0.45);
-  border: 1px solid rgba(198, 167, 255, 0.12);
-}
-
-.invite-link {
-  flex: 1 1 220px;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-family: 'SFMono-Regular', ui-monospace, monospace;
-  font-size: 0.82rem;
-  color: var(--text);
-  background: transparent;
-  padding: 4px 6px;
-}
-
-.invite-link-box .btn,
-.invite-link-box .btn-secondary {
-  flex: 0 0 auto;
-}
-
-/* ======= Admin panel ======= */
-.admin-panel {
-  background: linear-gradient(135deg, rgba(245, 200, 120, 0.06), rgba(245, 200, 120, 0.01));
-  border: 1px solid rgba(245, 200, 120, 0.22);
-}
-
-.admin-panel .eyebrow {
-  color: #f5c878;
-}
-
-/* ======= Repost button & pill ======= */
-.btn-repost {
-  font-size: 0.82rem;
-}
-
-.pill-repost {
-  background: rgba(122, 198, 255, 0.12);
-  color: #9fd3ff;
-}
-
-/* ======= Invite Marquee (Wall of inviters) ======= */
-.invite-marquee {
-  position: fixed;
-  left: 8px;
-  top: 0;
-  bottom: 0;
-  width: 76px;
-  z-index: 35;
-  pointer-events: none;
-  overflow: hidden;
-  /* "Невидимый барьер" — плавное появление/исчезновение сверху и снизу */
-  -webkit-mask-image: linear-gradient(
-    to bottom,
-    transparent 0%,
-    rgba(0, 0, 0, 0.35) 8%,
-    #000 22%,
-    #000 78%,
-    rgba(0, 0, 0, 0.35) 92%,
-    transparent 100%
-  );
-  mask-image: linear-gradient(
-    to bottom,
-    transparent 0%,
-    rgba(0, 0, 0, 0.35) 8%,
-    #000 22%,
-    #000 78%,
-    rgba(0, 0, 0, 0.35) 92%,
-    transparent 100%
-  );
-}
-
-.invite-marquee-track {
-  --marquee-duration: 28s;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 26px;
-  padding: 40px 0;
-  animation: inviteMarqueeScroll var(--marquee-duration) linear infinite;
-  will-change: transform;
-}
-
-@keyframes inviteMarqueeScroll {
-  from {
-    transform: translateY(0);
-  }
-  to {
-    transform: translateY(-50%);
-  }
-}
-
-.invite-marquee-item {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
-  flex-shrink: 0;
-  pointer-events: auto;
-  animation: inviteChipFloat 3.6s ease-in-out infinite;
-}
-
-.invite-marquee-item:nth-child(odd) {
-  animation-delay: -1.4s;
-}
-
-@keyframes inviteChipFloat {
-  0%,
-  100% {
-    transform: translateY(0);
-  }
-  50% {
-    transform: translateY(-3px);
-  }
-}
-
-.invite-marquee-avatar {
-  position: relative;
-  width: 54px;
-  height: 54px;
-  border-radius: 50%;
-  overflow: visible;
-  background: linear-gradient(
-    135deg,
-    rgba(143, 108, 255, 0.95),
-    rgba(198, 167, 255, 0.85)
-  );
-  box-shadow:
-    0 0 0 2px rgba(198, 167, 255, 0.45),
-    0 12px 26px rgba(143, 108, 255, 0.35);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition:
-    transform 0.25s ease,
-    box-shadow 0.25s ease;
-}
-
-.invite-marquee-avatar::before {
-  content: '';
-  position: absolute;
-  inset: -4px;
-  border-radius: 50%;
-  background: conic-gradient(
-    from 0deg,
-    rgba(198, 167, 255, 0) 0%,
-    rgba(198, 167, 255, 0.45) 25%,
-    rgba(89, 209, 255, 0.45) 50%,
-    rgba(198, 167, 255, 0.45) 75%,
-    rgba(198, 167, 255, 0) 100%
-  );
-  filter: blur(6px);
-  opacity: 0.7;
-  z-index: -1;
-  animation: inviteHaloSpin 6s linear infinite;
-}
-
-@keyframes inviteHaloSpin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-.invite-marquee-avatar img {
-  width: 100%;
-  height: 100%;
-  border-radius: 50%;
-  object-fit: cover;
-  display: block;
-}
-
-.invite-marquee-initial {
-  font-size: 1.35rem;
-  font-weight: 800;
-  color: #fff;
-  text-transform: uppercase;
-  letter-spacing: 0.02em;
-  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
-}
-
-.invite-marquee-badge {
-  position: absolute;
-  bottom: -4px;
-  right: -6px;
-  min-width: 22px;
-  padding: 2px 6px;
-  border-radius: 999px;
-  background: linear-gradient(135deg, #ffd166, #f7a325);
-  color: #1a1130;
-  font-size: 0.6rem;
-  font-weight: 800;
-  line-height: 1;
-  text-align: center;
-  border: 2px solid #0c0d22;
-  box-shadow: 0 4px 10px rgba(247, 163, 37, 0.5);
-}
-
-.invite-marquee-name {
-  font-size: 0.6rem;
-  color: rgba(229, 222, 255, 0.78);
-  text-align: center;
-  max-width: 70px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  letter-spacing: 0.03em;
-}
-
-/* Когда есть лента — даём контенту чуть-чуть отступ слева,
-   чтобы не залезала под ленту */
-body.has-invite-marquee .shell {
-  padding-left: max(env(safe-area-inset-left, 0px), 84px);
-  transition: padding-left 0.3s ease;
-}
-
-/* Узкие экраны (Mini App на телефоне) — компактнее */
-@media (max-width: 520px) {
-  .invite-marquee {
-    width: 56px;
-    left: 4px;
-  }
-  .invite-marquee-avatar {
-    width: 40px;
-    height: 40px;
-  }
-  .invite-marquee-initial {
-    font-size: 1rem;
-  }
-  .invite-marquee-badge {
-    font-size: 0.52rem;
-    min-width: 18px;
-    padding: 1px 4px;
-    border-width: 1.5px;
-  }
-  .invite-marquee-name {
-    display: none;
-  }
-  .invite-marquee-track {
-    gap: 18px;
-    padding: 28px 0;
-  }
-  body.has-invite-marquee .shell {
-    padding-left: max(env(safe-area-inset-left, 0px), 60px);
-  }
-}
-
-/* Уважение к пользователям с reduced-motion */
-@media (prefers-reduced-motion: reduce) {
-  .invite-marquee-track,
-  .invite-marquee-item,
-  .invite-marquee-avatar::before {
-    animation: none !important;
-  }
-}
-

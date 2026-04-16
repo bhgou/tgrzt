@@ -29,6 +29,7 @@ export const config = {
   port: Number.isFinite(port) ? port : 3000,
   appBaseUrl: process.env.APP_BASE_URL ?? `http://localhost:${port}`,
   botToken: process.env.BOT_TOKEN ?? '',
+  channelId: process.env.CHANNEL_ID ?? '',
   allowDevAuth: process.env.ALLOW_DEV_AUTH !== 'false',
   adminTelegramIds: parseList(process.env.ADMIN_TELEGRAM_IDS),
   adminUsernames: parseList(process.env.ADMIN_USERNAMES, true),
