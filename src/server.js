@@ -287,28 +287,44 @@ async function handleApiRequest(req, res, pathname, sessionUser) {
 
   if (req.method === 'POST' && pathname === '/api/tracks') {
     const formData = await readFormData(req, config.maxAudioBytes);
-    const wavFile = formData.get('track');
+    const audioFile = formData.get('track');
 
-    if (!(wavFile instanceof File) || wavFile.size === 0) {
-      throw httpError(400, 'Нужно приложить WAV-файл.');
+    if (!(audioFile instanceof File) || audioFile.size === 0) {
+      throw httpError(400, 'Нужно приложить аудиофайл (WAV или MP3).');
+    }
+
+    const uploadExt = path.extname(audioFile.name || '').toLowerCase();
+
+    if (uploadExt !== '.wav' && uploadExt !== '.mp3') {
+      throw httpError(400, 'Поддерживаются только WAV и MP3 файлы.');
     }
 
     let wavUpload = null;
     let mp3Upload = null;
 
     try {
-      wavUpload = await saveUploadedFile(wavFile, 'wav', {
-        allowedExtensions: ['.wav'],
-        maxBytes: config.maxAudioBytes,
-      });
+      if (uploadExt === '.wav') {
+        // WAV: сохраняем оригинал, конвертируем в MP3 через ffmpeg
+        wavUpload = await saveUploadedFile(audioFile, 'wav', {
+          allowedExtensions: ['.wav'],
+          maxBytes: config.maxAudioBytes,
+        });
 
-      mp3Upload = await convertWavToMp3(wavUpload.absolutePath);
-      ffmpegReady = true;
+        mp3Upload = await convertWavToMp3(wavUpload.absolutePath);
+        ffmpegReady = true;
+      } else {
+        // MP3: сохраняем напрямую, используем один файл для воспроизведения и скачивания
+        mp3Upload = await saveUploadedFile(audioFile, 'mp3', {
+          allowedExtensions: ['.mp3'],
+          maxBytes: config.maxAudioBytes,
+        });
+        wavUpload = { relativePath: mp3Upload.relativePath, absolutePath: mp3Upload.absolutePath };
+      }
 
       const track = createTrack(sessionUser.id, {
         title: trimText(formData.get('title'), 80),
-        description: trimText(formData.get('description'), 500),
-        genre: trimText(formData.get('genre'), 40),
+        description: '',
+        genre: '',
         wavPath: wavUpload.relativePath,
         mp3Path: mp3Upload.relativePath,
       });
@@ -318,13 +334,11 @@ async function handleApiRequest(req, res, pathname, sessionUser) {
         track: mapTrackForClient(track),
       });
     } catch (error) {
-      if (wavUpload?.relativePath) {
-        await removeStoredFile(wavUpload.relativePath).catch(() => {});
-      }
-
-      if (mp3Upload?.relativePath) {
-        await removeStoredFile(mp3Upload.relativePath).catch(() => {});
-      }
+      // При WAV удаляем оба файла; при MP3 wavUpload === mp3Upload, удаляем один раз
+      const toDelete = new Set();
+      if (wavUpload?.relativePath) toDelete.add(wavUpload.relativePath);
+      if (mp3Upload?.relativePath) toDelete.add(mp3Upload.relativePath);
+      await Promise.all([...toDelete].map((p) => removeStoredFile(p).catch(() => {})));
 
       throw error;
     }

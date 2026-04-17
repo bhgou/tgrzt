@@ -1,19 +1,19 @@
 const tg = window.Telegram?.WebApp;
 tg?.ready?.();
 tg?.expand?.();
-tg?.setHeaderColor?.('#0d1024');
-tg?.setBackgroundColor?.('#0d1024');
+tg?.setHeaderColor?.("#0d1024");
+tg?.setBackgroundColor?.("#0d1024");
 
 const state = {
-  activeView: 'home',
-  artistReturnView: 'home',
+  activeView: "home",
+  artistReturnView: "home",
   loading: true,
   pending: false,
   supportChatOpen: false,
   supportLoaded: false,
   supportLoading: false,
   supportMessages: [],
-  supportDraft: '',
+  supportDraft: "",
   showRegisterForm: false,
   me: null,
   selectedArtist: null,
@@ -22,10 +22,10 @@ const state = {
   topArtists: [],
   platformStats: null,
   inviteCode: null,
-  botUsername: '',
+  botUsername: "",
   pendingInviteCode: null,
   topInviters: [],
-  searchQuery: '',
+  searchQuery: "",
   searchResults: {
     artists: [],
     tracks: [],
@@ -34,6 +34,8 @@ const state = {
     ffmpegReady: false,
     botConfigured: false,
   },
+  activeTrack: null,
+  activeTrackPending: false,
 };
 
 // Extract invite code from Telegram start_param or URL ?invite=
@@ -47,7 +49,8 @@ const state = {
   } catch (_e) {}
   try {
     const url = new URL(window.location.href);
-    const fromQuery = url.searchParams.get('invite') || url.searchParams.get('startapp');
+    const fromQuery =
+      url.searchParams.get("invite") || url.searchParams.get("startapp");
     if (fromQuery) {
       state.pendingInviteCode = String(fromQuery).trim();
     }
@@ -55,13 +58,15 @@ const state = {
 })();
 
 const elements = {
-  app: document.querySelector('#app'),
-  supportBackdrop: document.querySelector('#support-backdrop'),
-  supportDrawer: document.querySelector('#support-drawer'),
-  supportToggle: document.querySelector('#support-toggle'),
-  toast: document.querySelector('#toast'),
-  topbarMeta: document.querySelector('#topbar-meta'),
-  navButtons: [...document.querySelectorAll('.nav-btn')],
+  app: document.querySelector("#app"),
+  supportBackdrop: document.querySelector("#support-backdrop"),
+  supportDrawer: document.querySelector("#support-drawer"),
+  supportToggle: document.querySelector("#support-toggle"),
+  toast: document.querySelector("#toast"),
+  topbarMeta: document.querySelector("#topbar-meta"),
+  navButtons: [...document.querySelectorAll(".nav-btn")],
+  trackModal: document.querySelector("#track-modal"),
+  trackModalBackdrop: document.querySelector("#track-modal-backdrop"),
 };
 
 let toastTimer = null;
@@ -69,35 +74,35 @@ let searchTimer = null;
 const recentTrackPlays = new Map();
 
 function escapeHtml(value) {
-  return String(value ?? '')
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#39;');
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
 }
 
 function formatDate(dateString) {
   if (!dateString) {
-    return '';
+    return "";
   }
 
-  return new Intl.DateTimeFormat('ru-RU', {
-    day: '2-digit',
-    month: 'short',
+  return new Intl.DateTimeFormat("ru-RU", {
+    day: "2-digit",
+    month: "short",
   }).format(new Date(dateString));
 }
 
 function formatDateTime(dateString) {
   if (!dateString) {
-    return '';
+    return "";
   }
 
-  return new Intl.DateTimeFormat('ru-RU', {
-    day: '2-digit',
-    month: 'short',
-    hour: '2-digit',
-    minute: '2-digit',
+  return new Intl.DateTimeFormat("ru-RU", {
+    day: "2-digit",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
   }).format(new Date(dateString));
 }
 
@@ -106,86 +111,95 @@ function formatRating(value) {
 }
 
 function formatFollowers(value) {
-  return new Intl.NumberFormat('ru-RU').format(Number(value || 0));
+  return new Intl.NumberFormat("ru-RU").format(Number(value || 0));
+}
+
+function pluralizeRu(n, one, few, many) {
+  const abs = Math.abs(Math.trunc(n)) % 100;
+  const mod10 = abs % 10;
+  if (abs > 10 && abs < 20) return many;
+  if (mod10 === 1) return one;
+  if (mod10 >= 2 && mod10 <= 4) return few;
+  return many;
 }
 
 function getViewLabel(view) {
-  if (view === 'search') {
-    return 'поиск';
+  if (view === "search") {
+    return "поиск";
   }
 
-  if (view === 'profile') {
-    return 'кабинет';
+  if (view === "profile") {
+    return "кабинет";
   }
 
-  if (view === 'upload') {
-    return 'загрузку';
+  if (view === "upload") {
+    return "загрузку";
   }
 
-  return 'главную';
+  return "главную";
 }
 
 function getAvatarInitials(name) {
-  return String(name || 'DS')
+  return String(name || "DS")
     .trim()
     .slice(0, 2)
     .toUpperCase();
 }
 
 function getRoleLabel(role) {
-  if (role === 'artist') {
-    return 'Артист';
+  if (role === "artist") {
+    return "Артист";
   }
 
-  if (role === 'listener') {
-    return 'Слушатель';
+  if (role === "listener") {
+    return "Слушатель";
   }
 
-  return 'Гость';
+  return "Гость";
 }
 
 function getRoleModeLabel(role) {
-  if (role === 'artist') {
-    return 'Artist mode';
+  if (role === "artist") {
+    return "Artist mode";
   }
 
-  if (role === 'listener') {
-    return 'Listener mode';
+  if (role === "listener") {
+    return "Listener mode";
   }
 
-  return 'Guest mode';
+  return "Guest mode";
 }
 
 function getRoleDescription(role) {
-  if (role === 'artist') {
-    return 'Публикация релизов, сбор оценок, комментариев и подписчиков.';
+  if (role === "artist") {
+    return "Публикация релизов, сбор оценок, комментариев и подписчиков.";
   }
 
-  if (role === 'listener') {
-    return 'Прослушивание демок, лайки, комментарии и поиск новых артистов.';
+  if (role === "listener") {
+    return "Прослушивание демок, лайки, комментарии и поиск новых артистов.";
   }
 
-  return 'Профиль ещё не завершён.';
+  return "Профиль ещё не завершён.";
 }
 
 function isArtist(user) {
-  return user?.role === 'artist';
+  return user?.role === "artist";
 }
 
 function isListener(user) {
-  return user?.role === 'listener';
+  return user?.role === "listener";
 }
 
 function canSwitchToListener(user) {
-  return !(user?.role === 'artist' && Number(user?.tracksCount) > 0);
+  return !(user?.role === "artist" && Number(user?.tracksCount) > 0);
 }
 
 function coverGradient(seed) {
   const palettes = [
-    'linear-gradient(135deg, rgba(124,92,255,0.92), rgba(196,167,255,0.88))',
-    'linear-gradient(135deg, rgba(155,109,255,0.9), rgba(89,209,255,0.78))',
-    'linear-gradient(135deg, rgba(109,82,255,0.9), rgba(255,125,214,0.72))',
-    'linear-gradient(135deg, rgba(198,167,255,0.9), rgba(92,74,226,0.82))',
+    "linear-gradient(135deg, rgba(124,92,255,0.92), rgba(196,167,255,0.88))",
+    "linear-gradient(135deg, rgba(155,109,255,0.9), rgba(89,209,255,0.78))",
+    "linear-gradient(135deg, rgba(109,82,255,0.9), rgba(255,125,214,0.72))",
+    "linear-gradient(135deg, rgba(198,167,255,0.9), rgba(92,74,226,0.82))",
   ];
 
   return palettes[Number(seed || 0) % palettes.length];
@@ -197,33 +211,33 @@ function showToast(message, isError = false) {
   }
 
   elements.toast.textContent = message;
-  elements.toast.classList.add('is-visible');
-  elements.toast.classList.toggle('is-error', isError);
+  elements.toast.classList.add("is-visible");
+  elements.toast.classList.toggle("is-error", isError);
 
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => {
-    elements.toast.classList.remove('is-visible');
-    elements.toast.classList.remove('is-error');
+    elements.toast.classList.remove("is-visible");
+    elements.toast.classList.remove("is-error");
   }, 3200);
 }
 
 async function api(path, options = {}) {
   const headers = new Headers(options.headers || {});
-  const initData = tg?.initData || '';
+  const initData = tg?.initData || "";
 
   if (initData) {
-    headers.set('X-Telegram-Init-Data', initData);
+    headers.set("X-Telegram-Init-Data", initData);
   }
 
   let body = options.body;
 
-  if (body && !(body instanceof FormData) && typeof body === 'object') {
-    headers.set('Content-Type', 'application/json');
+  if (body && !(body instanceof FormData) && typeof body === "object") {
+    headers.set("Content-Type", "application/json");
     body = JSON.stringify(body);
   }
 
   const response = await fetch(path, {
-    method: options.method || 'GET',
+    method: options.method || "GET",
     headers,
     body,
   });
@@ -231,7 +245,7 @@ async function api(path, options = {}) {
   const data = await response.json().catch(() => ({}));
 
   if (!response.ok) {
-    throw new Error(data.error || 'Запрос завершился с ошибкой.');
+    throw new Error(data.error || "Запрос завершился с ошибкой.");
   }
 
   return data;
@@ -264,9 +278,11 @@ async function loadBootstrap(options = {}) {
     render();
   }
 
-  const data = await api('/api/bootstrap');
+  const data = await api("/api/bootstrap");
   Object.assign(state, data);
-  state.searchResults = state.searchQuery.trim() ? state.searchResults : { artists: [], tracks: [] };
+  state.searchResults = state.searchQuery.trim()
+    ? state.searchResults
+    : { artists: [], tracks: [] };
 
   state.loading = false;
   render();
@@ -277,16 +293,16 @@ async function loadBootstrap(options = {}) {
     const code = state.pendingInviteCode;
     state.pendingInviteCode = null;
     try {
-      const result = await api('/api/invite/claim', {
-        method: 'POST',
+      const result = await api("/api/invite/claim", {
+        method: "POST",
         body: JSON.stringify({ code }),
-        headers: { 'Content-Type': 'application/json' },
+        headers: { "Content-Type": "application/json" },
       });
       if (result.ok) {
-        showToast('Invite активирован! Автор поднимется в стене инвайтеров.');
+        showToast("Invite активирован! Автор поднимется в стене инвайтеров.");
       }
     } catch (error) {
-      console.warn('[invite] claim failed:', error.message);
+      console.warn("[invite] claim failed:", error.message);
     }
   }
 }
@@ -329,12 +345,12 @@ async function openArtistProfile(artistId, options = {}) {
   try {
     const profile = await api(`/api/artists/${artistId}`);
 
-    if (options.rememberReturnView !== false && state.activeView !== 'artist') {
+    if (options.rememberReturnView !== false && state.activeView !== "artist") {
       state.artistReturnView = state.activeView;
     }
 
     state.selectedArtist = profile;
-    state.activeView = 'artist';
+    state.activeView = "artist";
     render();
     return profile;
   } catch (error) {
@@ -353,7 +369,7 @@ async function loadSupportMessages(options = {}) {
   }
 
   try {
-    const response = await api('/api/support/messages');
+    const response = await api("/api/support/messages");
     state.supportMessages = response.messages || [];
     state.supportLoaded = true;
   } catch (error) {
@@ -378,16 +394,16 @@ function closeSupportChat() {
   render();
 }
 
-function renderAvatar(entity, className = 'avatar') {
+function renderAvatar(entity, className = "avatar") {
   if (entity?.avatarUrl) {
-    return `<span class="${className}"><img src="${entity.avatarUrl}" alt="${escapeHtml(entity.displayName || entity.nickname || 'Avatar')}" /></span>`;
+    return `<span class="${className}"><img src="${entity.avatarUrl}" alt="${escapeHtml(entity.displayName || entity.nickname || "Avatar")}" /></span>`;
   }
 
   return `<span class="${className}">${escapeHtml(getAvatarInitials(entity?.displayName || entity?.nickname || entity?.username))}</span>`;
 }
 
 function renderRoleTag(role) {
-  const safeRole = role === 'artist' || role === 'listener' ? role : 'guest';
+  const safeRole = role === "artist" || role === "listener" ? role : "guest";
   return `<span class="role-tag ${safeRole}">${escapeHtml(getRoleLabel(safeRole))}</span>`;
 }
 
@@ -422,16 +438,16 @@ function renderArtistCard(artist) {
           ${renderAvatar(artist)}
           <span class="meta-col">
             <strong>${escapeHtml(artist.displayName)}</strong>
-            <span class="muted">@${escapeHtml(artist.nickname || artist.username || 'artist')}</span>
+            <span class="muted">@${escapeHtml(artist.nickname || artist.username || "artist")}</span>
           </span>
         </span>
       </button>
       <div class="badge-row">
-        ${renderRoleTag('artist')}
+        ${renderRoleTag("artist")}
         <span class="pill">${formatFollowers(artist.tracksCount)} треков</span>
         <span class="pill">${formatFollowers(artist.followersCount)} подписчиков</span>
       </div>
-      <p class="muted">${escapeHtml(artist.bio || 'Пока без описания, но профиль уже открыт для подписок.')}</p>
+      <p class="muted">${escapeHtml(artist.bio || "Пока без описания, но профиль уже открыт для подписок.")}</p>
       <div class="cta-row">
         <button class="btn-secondary" data-action="open-artist" data-artist-id="${artist.id}">
           Смотреть треки
@@ -440,9 +456,9 @@ function renderArtistCard(artist) {
           class="btn-ghost"
           data-action="toggle-follow"
           data-artist-id="${artist.id}"
-          ${artist.id === state.me?.id ? 'disabled' : ''}
+          ${artist.id === state.me?.id ? "disabled" : ""}
         >
-          ${artist.id === state.me?.id ? 'Это твой профиль' : artist.isFollowing ? 'Подписка активна' : 'Подписаться'}
+          ${artist.id === state.me?.id ? "Это твой профиль" : artist.isFollowing ? "Подписка активна" : "Подписаться"}
         </button>
       </div>
     </article>
@@ -461,28 +477,34 @@ function renderComment(comment) {
 
 function renderTrackCard(track) {
   const canDeleteTrack = Boolean(state.me?.isAdmin || track.isOwnTrack);
-  const deleteLabel = state.me?.isAdmin && !track.isOwnTrack ? 'Удалить как админ' : 'Удалить трек';
+  const deleteLabel =
+    state.me?.isAdmin && !track.isOwnTrack
+      ? "Удалить как админ"
+      : "Удалить трек";
   const ratingOptions = Array.from({ length: 10 }, (_, index) => index + 1)
-    .map((score) => `<option value="${score}" ${Number(track.userRating) === score ? 'selected' : ''}>${score}</option>`)
-    .join('');
+    .map(
+      (score) =>
+        `<option value="${score}" ${Number(track.userRating) === score ? "selected" : ""}>${score}</option>`,
+    )
+    .join("");
 
   return `
     <article class="track-card">
       <div class="track-head">
         <div>
-          <p class="eyebrow">${formatDate(track.createdAt) || 'Свежий релиз'}</p>
+          <p class="eyebrow">${formatDate(track.createdAt) || "Свежий релиз"}</p>
           <h4>${escapeHtml(track.title)}</h4>
-          <span class="pill pill-genre">${escapeHtml(track.genre || 'Demo tape')}</span>
+          <span class="pill pill-genre">${escapeHtml(track.genre || "Demo tape")}</span>
         </div>
         <span class="rating-pill">${formatRating(track.averageRating)} / 10</span>
       </div>
 
       <div class="artist-row">
         <button class="artist-link artist-link-inline" data-action="open-artist" data-artist-id="${track.artist.id}">
-          ${renderAvatar(track.artist, 'avatar avatar-sm')}
+          ${renderAvatar(track.artist, "avatar avatar-sm")}
           <span class="meta-col">
             <strong>${escapeHtml(track.artist.displayName)}</strong>
-            <span class="muted">@${escapeHtml(track.artist.nickname || track.artist.username || 'artist')}</span>
+            <span class="muted">@${escapeHtml(track.artist.nickname || track.artist.username || "artist")}</span>
           </span>
         </button>
         <div class="spacer"></div>
@@ -493,21 +515,21 @@ function renderTrackCard(track) {
           class="btn-ghost"
           data-action="toggle-follow"
           data-artist-id="${track.artist.id}"
-          ${track.isOwnTrack ? 'disabled' : ''}
+          ${track.isOwnTrack ? "disabled" : ""}
         >
-          ${track.isOwnTrack ? 'Это твой релиз' : track.isFollowingArtist ? 'Подписан' : 'Подписаться'}
+          ${track.isOwnTrack ? "Это твой релиз" : track.isFollowingArtist ? "Подписан" : "Подписаться"}
         </button>
       </div>
 
       <div class="badge-row">
-        ${renderRoleTag('artist')}
+        ${renderRoleTag("artist")}
         <span class="pill">${track.ratingsCount} оценок</span>
         <span class="pill">${track.likesCount} лайков</span>
         <span class="pill">${track.commentsCount} комментариев</span>
         <span class="pill pill-repost">🔁 ${track.repostsCount || 0}</span>
       </div>
 
-      <p class="track-description">${escapeHtml(track.description || 'Автор ждёт честный фидбек по демке.')}</p>
+      <p class="track-description">${escapeHtml(track.description || "Автор ждёт честный фидбек по демке.")}</p>
 
       <audio controls src="${track.mp3Url}" data-track-id="${track.id}"></audio>
 
@@ -517,9 +539,9 @@ function renderTrackCard(track) {
           class="btn-ghost"
           data-action="toggle-like"
           data-track-id="${track.id}"
-          ${track.isOwnTrack ? 'disabled' : ''}
+          ${track.isOwnTrack ? "disabled" : ""}
         >
-          ${track.isLiked ? 'Убрать лайк' : 'Лайкнуть'}
+          ${track.isLiked ? "Убрать лайк" : "Лайкнуть"}
         </button>
         <button
           class="btn-ghost btn-repost"
@@ -527,9 +549,9 @@ function renderTrackCard(track) {
           data-track-id="${track.id}"
           data-track-title="${escapeHtml(track.title)}"
           data-artist-name="${escapeHtml(track.artist.displayName)}"
-          ${track.isOwnTrack ? 'disabled' : ''}
+          ${track.isOwnTrack ? "disabled" : ""}
         >
-          ${track.isReposted ? '🔁 Репостнуто (+1)' : '🔁 Репост для голоса'}
+          ${track.isReposted ? "🔁 Репостнуто (+1)" : "🔁 Репост для голоса"}
         </button>
         <a class="btn-ghost" href="${track.wavUrl}" download>Скачать WAV</a>
         ${
@@ -539,26 +561,26 @@ function renderTrackCard(track) {
                 ${deleteLabel}
               </button>
             `
-            : ''
+            : ""
         }
       </div>
 
       <form class="inline-form" data-form="rating" data-track-id="${track.id}">
         <div class="field">
           <label>Поставь оценку по 10-балльной шкале</label>
-          <select name="score" ${track.isOwnTrack ? 'disabled' : ''}>
+          <select name="score" ${track.isOwnTrack ? "disabled" : ""}>
             ${ratingOptions}
           </select>
         </div>
-        <button class="btn-secondary" ${track.isOwnTrack ? 'disabled' : ''}>
-          ${track.userRating ? 'Обновить оценку' : 'Оценить трек'}
+        <button class="btn-secondary" ${track.isOwnTrack ? "disabled" : ""}>
+          ${track.userRating ? "Обновить оценку" : "Оценить трек"}
         </button>
       </form>
 
       <details class="comments-toggle">
         <summary>Комментарии (${track.commentsCount})</summary>
         <div class="comment-list">
-          ${track.comments.length ? track.comments.map(renderComment).join('') : '<p class="muted" style="margin:8px 0 0">Пока без комментариев</p>'}
+          ${track.comments.length ? track.comments.map(renderComment).join("") : '<p class="muted" style="margin:8px 0 0">Пока без комментариев</p>'}
         </div>
       </details>
 
@@ -573,7 +595,7 @@ function renderTrackCard(track) {
 }
 
 function renderSupportBubble(message) {
-  const author = message.senderType === 'user' ? 'Вы' : 'Поддержка';
+  const author = message.senderType === "user" ? "Вы" : "Поддержка";
 
   return `
     <div class="support-bubble ${message.senderType}">
@@ -593,24 +615,30 @@ function renderSupportDrawer() {
     ? state.supportMessages
     : [
         {
-          id: 'welcome',
-          senderType: 'support',
-          body: 'Поддержка на связи. Напиши сюда вопрос по ролям, загрузке WAV, Mini App, подпискам или модерации.',
-          createdAt: '',
+          id: "welcome",
+          senderType: "support",
+          body: "Поддержка на связи. Напиши сюда вопрос по ролям, загрузке WAV, Mini App, подпискам или модерации.",
+          createdAt: "",
         },
       ];
 
   if (elements.supportToggle) {
     elements.supportToggle.setAttribute(
-      'aria-label',
-      state.supportChatOpen ? 'Закрыть чат поддержки' : 'Открыть чат поддержки',
+      "aria-label",
+      state.supportChatOpen ? "Закрыть чат поддержки" : "Открыть чат поддержки",
     );
-    elements.supportToggle.classList.toggle('is-open', state.supportChatOpen);
+    elements.supportToggle.classList.toggle("is-open", state.supportChatOpen);
     elements.supportToggle.disabled = state.pending || state.supportLoading;
   }
-  elements.supportBackdrop.classList.toggle('is-visible', state.supportChatOpen);
-  elements.supportDrawer.classList.toggle('is-open', state.supportChatOpen);
-  elements.supportDrawer.setAttribute('aria-hidden', state.supportChatOpen ? 'false' : 'true');
+  elements.supportBackdrop.classList.toggle(
+    "is-visible",
+    state.supportChatOpen,
+  );
+  elements.supportDrawer.classList.toggle("is-open", state.supportChatOpen);
+  elements.supportDrawer.setAttribute(
+    "aria-hidden",
+    state.supportChatOpen ? "false" : "true",
+  );
   elements.supportDrawer.innerHTML = `
     <div class="support-head">
       <div>
@@ -634,7 +662,7 @@ function renderSupportDrawer() {
       ${
         state.supportLoading
           ? '<div class="empty-state"><strong>Загружаю чат поддержки</strong><span class="muted">Пара секунд.</span></div>'
-          : supportMessages.map(renderSupportBubble).join('')
+          : supportMessages.map(renderSupportBubble).join("")
       }
     </div>
 
@@ -643,8 +671,176 @@ function renderSupportDrawer() {
         <label for="support-message-input">Сообщение в поддержку</label>
         <textarea id="support-message-input" name="body" maxlength="500" placeholder="Например: у меня не открывается Mini App или не загружается WAV.">${escapeHtml(state.supportDraft)}</textarea>
       </div>
-      <button class="btn" ${state.supportLoading ? 'disabled' : ''}>Отправить в поддержку</button>
+      <button class="btn" ${state.supportLoading ? "disabled" : ""}>Отправить в поддержку</button>
     </form>
+  `;
+}
+
+// =================== TRACK MODAL ===================
+function findTrackInState(trackId) {
+  const id = Number(trackId);
+  const pools = [
+    state.latestTracks,
+    state.featuredTracks,
+    state.me?.ownTracks || [],
+    state.me?.likedTracks || [],
+    state.searchResults?.tracks || [],
+    state.selectedArtist?.tracks || [],
+  ];
+  for (const pool of pools) {
+    const found = pool.find((t) => Number(t.id) === id);
+    if (found) return found;
+  }
+  return null;
+}
+
+async function openTrackModal(trackId) {
+  const track = findTrackInState(trackId);
+  if (!track) {
+    showToast("Трек не найден.", true);
+    return;
+  }
+  state.activeTrack = track;
+  renderTrackModal();
+}
+
+function closeTrackModal() {
+  state.activeTrack = null;
+  renderTrackModal();
+}
+
+function renderTrackModal() {
+  if (!elements.trackModal || !elements.trackModalBackdrop) return;
+
+  const track = state.activeTrack;
+  const open = Boolean(track);
+
+  elements.trackModalBackdrop.classList.toggle("is-visible", open);
+  elements.trackModal.classList.toggle("is-open", open);
+  elements.trackModal.setAttribute("aria-hidden", open ? "false" : "true");
+
+  if (!open) {
+    elements.trackModal.innerHTML = "";
+    document.body.classList.remove("track-modal-locked");
+    return;
+  }
+
+  document.body.classList.add("track-modal-locked");
+
+  const myRating = Number(track.myRating || 0);
+  const canRate = !track.isOwnTrack && state.me?.isRegistered;
+  const canLike = !track.isOwnTrack && state.me?.isRegistered;
+  const canComment = state.me?.isRegistered;
+  const canDelete = Boolean(state.me?.isAdmin || track.isOwnTrack);
+
+  const ratingButtons = Array.from({ length: 10 }, (_, i) => {
+    const score = i + 1;
+    const active = myRating === score;
+    return `
+      <button
+        type="button"
+        class="rate-btn ${active ? "is-active" : ""}"
+        data-action="rate-track-modal"
+        data-track-id="${track.id}"
+        data-score="${score}"
+        ${canRate ? "" : "disabled"}
+      >${score}</button>
+    `;
+  }).join("");
+
+  const comments = (track.comments || []).slice(0, 30);
+
+  elements.trackModal.innerHTML = `
+    <div class="track-modal-head">
+      <div>
+        <p class="eyebrow">Трек</p>
+        <h3>${escapeHtml(track.title)}</h3>
+        <span class="muted">@${escapeHtml(track.artist.nickname || track.artist.username || "artist")} · ${escapeHtml(track.genre || "Релиз")}</span>
+      </div>
+      <button class="support-close" type="button" data-action="track-modal-close" aria-label="Закрыть">✕</button>
+    </div>
+
+    <div class="track-modal-stats">
+      <div class="modal-stat">
+        <strong>${formatFollowers(track.playsCount)}</strong>
+        <span class="muted">прослушиваний</span>
+      </div>
+      <div class="modal-stat">
+        <strong>${formatRating(track.averageRating)} / 10</strong>
+        <span class="muted">оценка</span>
+      </div>
+      <div class="modal-stat">
+        <strong>${formatFollowers(track.likesCount)}</strong>
+        <span class="muted">лайков</span>
+      </div>
+    </div>
+
+    <audio
+      class="track-modal-audio"
+      controls
+      controlsList="nodownload noplaybackrate noremoteplayback"
+      disablepictureinpicture
+      src="${track.mp3Url}"
+      data-track-id="${track.id}"
+    ></audio>
+
+    <div class="track-modal-actions">
+      <button
+        class="btn ${track.isLiked ? "btn-secondary" : ""}"
+        data-action="toggle-like"
+        data-track-id="${track.id}"
+        ${canLike ? "" : "disabled"}
+      >
+        ${track.isLiked ? "♥ Лайкнуто" : "♡ Лайк"}
+      </button>
+      ${
+        canDelete
+          ? `<button class="btn-danger" data-action="delete-track" data-track-id="${track.id}">Удалить</button>`
+          : ""
+      }
+    </div>
+
+    <div class="track-modal-section">
+      <p class="eyebrow">Оценка трека</p>
+      ${
+        canRate
+          ? `<p class="muted">Поставь оценку от 1 до 10. Можно поменять в любой момент.</p>`
+          : `<p class="muted">${track.isOwnTrack ? "Свой трек оценивать нельзя." : "Зайди под своим аккаунтом, чтобы оценить."}</p>`
+      }
+      <div class="rate-row">
+        ${ratingButtons}
+      </div>
+    </div>
+
+    <div class="track-modal-section">
+      <p class="eyebrow">Комментарии</p>
+      ${
+        canComment
+          ? `
+            <form class="comment-form" data-form="comment-modal" data-track-id="${track.id}">
+              <textarea name="body" maxlength="500" placeholder="Что думаешь о треке?"></textarea>
+              <button class="btn" type="submit">Отправить</button>
+            </form>
+          `
+          : `<p class="muted">Зайди под своим аккаунтом, чтобы оставить комментарий.</p>`
+      }
+      <div class="comment-list">
+        ${
+          comments.length
+            ? comments
+                .map(
+                  (c) => `
+                    <div class="comment-item">
+                      <strong>${escapeHtml(c.user?.nickname || c.user?.firstName || "Слушатель")}</strong>
+                      <span>${escapeHtml(c.body)}</span>
+                    </div>
+                  `,
+                )
+                .join("")
+            : `<div class="empty-state"><span class="muted">Пока нет комментариев — будь первым.</span></div>`
+        }
+      </div>
+    </div>
   `;
 }
 
@@ -659,7 +855,7 @@ function renderTracksSection(title, subtitle, tracks, emptyMessage) {
       </div>
       ${
         tracks.length
-          ? `<div class="track-grid">${tracks.map(renderTrackCard).join('')}</div>`
+          ? `<div class="track-grid">${tracks.map(renderTrackCard).join("")}</div>`
           : `<div class="empty-state"><strong>${escapeHtml(emptyMessage)}</strong><span class="muted">Когда артисты начнут грузить демки, они появятся здесь.</span></div>`
       }
     </section>
@@ -668,8 +864,35 @@ function renderTracksSection(title, subtitle, tracks, emptyMessage) {
 
 function renderCompactTrackCard(track, options = {}) {
   const showArtist = Boolean(options.showArtist);
+  const simple = Boolean(options.simple);
   const canLike = !track.isOwnTrack;
   const canDeleteTrack = Boolean(state.me?.isAdmin || track.isOwnTrack);
+
+  if (simple) {
+    return `
+      <article class="compact-track-card compact-track-card--simple">
+        <button class="compact-track-meta" type="button" data-action="open-track" data-track-id="${track.id}">
+          <span class="meta-col">
+            <strong>${escapeHtml(track.title)}</strong>
+            ${
+              showArtist
+                ? `<span class="muted">@${escapeHtml(track.artist.nickname || track.artist.username || "artist")}</span>`
+                : `<span class="muted">${escapeHtml(track.genre || "Релиз")}</span>`
+            }
+          </span>
+          <span class="compact-track-open-hint" aria-hidden="true">Открыть →</span>
+        </button>
+        <audio
+          controls
+          controlsList="nodownload noplaybackrate noremoteplayback"
+          disablepictureinpicture
+          preload="none"
+          src="${track.mp3Url}"
+          data-track-id="${track.id}"
+        ></audio>
+      </article>
+    `;
+  }
 
   return `
     <article class="compact-track-card">
@@ -679,8 +902,8 @@ function renderCompactTrackCard(track, options = {}) {
             <strong>${escapeHtml(track.title)}</strong>
             ${
               showArtist
-                ? `<span class="muted">@${escapeHtml(track.artist.nickname || track.artist.username || 'artist')}</span>`
-                : `<span class="muted">${escapeHtml(track.genre || 'Релиз')}</span>`
+                ? `<span class="muted">@${escapeHtml(track.artist.nickname || track.artist.username || "artist")}</span>`
+                : `<span class="muted">${escapeHtml(track.genre || "Релиз")}</span>`
             }
           </div>
           <span class="pill">${formatFollowers(track.playsCount)} прослушиваний</span>
@@ -690,7 +913,13 @@ function renderCompactTrackCard(track, options = {}) {
           <span class="pill">${formatFollowers(track.likesCount)} лайков</span>
           <span class="pill">${formatFollowers(track.commentsCount)} комм.</span>
         </div>
-        <audio controls src="${track.mp3Url}" data-track-id="${track.id}"></audio>
+        <audio
+          controls
+          controlsList="nodownload noplaybackrate noremoteplayback"
+          disablepictureinpicture
+          src="${track.mp3Url}"
+          data-track-id="${track.id}"
+        ></audio>
         ${
           canLike || canDeleteTrack
             ? `
@@ -699,10 +928,10 @@ function renderCompactTrackCard(track, options = {}) {
                   canLike
                     ? `
                       <button class="btn-ghost" data-action="toggle-like" data-track-id="${track.id}">
-                        ${track.isLiked ? 'Убрать лайк' : 'Лайк'}
+                        ${track.isLiked ? "Убрать лайк" : "Лайк"}
                       </button>
                     `
-                    : ''
+                    : ""
                 }
                 ${
                   canDeleteTrack
@@ -711,11 +940,11 @@ function renderCompactTrackCard(track, options = {}) {
                         Удалить
                       </button>
                     `
-                    : ''
+                    : ""
                 }
               </div>
             `
-            : ''
+            : ""
         }
       </div>
     </article>
@@ -732,7 +961,7 @@ function renderCompactTracksSection(title, tracks, emptyMessage, options = {}) {
       </div>
       ${
         tracks.length
-          ? `<div class="compact-track-list">${tracks.map((track) => renderCompactTrackCard(track, options)).join('')}</div>`
+          ? `<div class="compact-track-list">${tracks.map((track) => renderCompactTrackCard(track, options)).join("")}</div>`
           : `<div class="empty-state"><strong>${escapeHtml(emptyMessage)}</strong></div>`
       }
     </section>
@@ -750,7 +979,7 @@ function renderArtistsSection(title, subtitle, artists) {
       </div>
       ${
         artists.length
-          ? `<div class="artist-grid">${artists.map(renderArtistCard).join('')}</div>`
+          ? `<div class="artist-grid">${artists.map(renderArtistCard).join("")}</div>`
           : `<div class="empty-state"><strong>Пока нет артистов</strong><span class="muted">Регистрация артистов появится здесь автоматически.</span></div>`
       }
     </section>
@@ -761,38 +990,26 @@ function renderTopArtistCard(artist, index) {
   const audioBlock = artist.topTrackMp3Url
     ? `<audio class="artist-top-audio" src="${artist.topTrackMp3Url}" preload="none"></audio>
        <button class="play-overlay" type="button" data-action="toggle-artist-top-track" data-artist-id="${artist.id}" aria-label="Слушать топ-трек">▶</button>`
-    : '';
+    : "";
 
   return `
-    <article class="top-artist-card">
-      <div class="top-artist-head">
-        <div class="artist-avatar-play">
-          ${renderAvatar(artist, 'avatar avatar-xl')}
+    <article class="top-artist-card top-artist-card--stacked" data-action="open-artist" data-artist-id="${artist.id}" role="button" tabindex="0">
+      <div class="top-artist-cover">
+        <span class="top-rank">#${index + 1}</span>
+        <div class="artist-avatar-play artist-avatar-play--cover">
+          ${renderAvatar(artist, "avatar avatar-cover")}
           ${audioBlock}
         </div>
-        <button class="artist-link" data-action="open-artist" data-artist-id="${artist.id}">
-          <span class="top-rank">#${index + 1}</span>
-          <span class="meta-col">
-            <strong>${escapeHtml(artist.displayName)}</strong>
-            <span class="muted">@${escapeHtml(artist.nickname || artist.username || 'artist')}</span>
-          </span>
-        </button>
       </div>
-      <div class="badge-row">
-        <span class="pill">${formatFollowers(artist.monthlyPlaysCount)} за месяц</span>
-        <span class="pill">${formatFollowers(artist.playsCount)} всего</span>
-      </div>
-      <p class="muted">${escapeHtml(artist.bio || 'Артист уже открыт для прослушивания и подписок.')}</p>
-      <div class="cta-row">
-        <button class="btn-secondary" data-action="open-artist" data-artist-id="${artist.id}">Профиль</button>
-        <button
-          class="btn-ghost"
-          data-action="toggle-follow"
-          data-artist-id="${artist.id}"
-          ${artist.id === state.me?.id ? 'disabled' : ''}
-        >
-          ${artist.id === state.me?.id ? 'Это ты' : artist.isFollowing ? 'Подписка' : 'Подписаться'}
-        </button>
+      <div class="top-artist-body">
+        <div class="meta-col">
+          <strong>${escapeHtml(artist.displayName)}</strong>
+          <span class="muted">@${escapeHtml(artist.nickname || artist.username || "artist")}</span>
+        </div>
+        <div class="top-artist-plays">
+          <span class="top-artist-plays-num">${formatFollowers(artist.monthlyPlaysCount)}</span>
+          <span class="top-artist-plays-label">прослушиваний за месяц</span>
+        </div>
       </div>
     </article>
   `;
@@ -809,7 +1026,7 @@ function renderTopArtistsSection(artists) {
       </div>
       ${
         artists.length
-          ? `<div class="top-artist-rail">${artists.map(renderTopArtistCard).join('')}</div>`
+          ? `<div class="top-artist-rail">${artists.map(renderTopArtistCard).join("")}</div>`
           : '<div class="empty-state"><strong>Пока нет артистов</strong><span class="muted">Когда появятся артисты, топ-5 будет здесь.</span></div>'
       }
     </section>
@@ -821,10 +1038,10 @@ function renderArtistListCard(artist, index) {
     <article class="artist-list-card">
       <button class="artist-link artist-link-inline" data-action="open-artist" data-artist-id="${artist.id}">
         <span class="list-rank">${index + 6}</span>
-        ${renderAvatar(artist, 'avatar avatar-sm')}
+        ${renderAvatar(artist, "avatar avatar-sm")}
         <span class="meta-col">
           <strong>${escapeHtml(artist.displayName)}</strong>
-          <span class="muted">@${escapeHtml(artist.nickname || artist.username || 'artist')}</span>
+          <span class="muted">@${escapeHtml(artist.nickname || artist.username || "artist")}</span>
         </span>
       </button>
       <div class="spacer"></div>
@@ -836,7 +1053,7 @@ function renderArtistListCard(artist, index) {
 
 function renderArtistRowsSection(artists) {
   if (!artists.length) {
-    return '';
+    return "";
   }
 
   return `
@@ -847,7 +1064,7 @@ function renderArtistRowsSection(artists) {
           <h3>Популярные артисты</h3>
         </div>
       </div>
-      <div class="artist-list">${artists.map(renderArtistListCard).join('')}</div>
+      <div class="artist-list">${artists.map(renderArtistListCard).join("")}</div>
     </section>
   `;
 }
@@ -858,20 +1075,20 @@ function renderRoleOptions(name, selectedRole, options = {}) {
   return `
     <div class="role-grid">
       <label class="role-option">
-        <input type="radio" name="${escapeHtml(name)}" value="artist" ${selectedRole === 'artist' ? 'checked' : ''} />
+        <input type="radio" name="${escapeHtml(name)}" value="artist" ${selectedRole === "artist" ? "checked" : ""} />
         <span class="role-card">
           <small>Artist mode</small>
           <strong>Артист</strong>
           <span>Загружай WAV, собирай оценки и строй аудиторию. Роль закрепится после регистрации.</span>
         </span>
       </label>
-      <label class="role-option ${listenerDisabled ? 'is-disabled' : ''}">
+      <label class="role-option ${listenerDisabled ? "is-disabled" : ""}">
         <input
           type="radio"
           name="${escapeHtml(name)}"
           value="listener"
-          ${selectedRole === 'listener' ? 'checked' : ''}
-          ${listenerDisabled ? 'disabled' : ''}
+          ${selectedRole === "listener" ? "checked" : ""}
+          ${listenerDisabled ? "disabled" : ""}
         />
         <span class="role-card">
           <small>Listener mode</small>
@@ -956,14 +1173,64 @@ function renderProfileStats(user) {
   `;
 }
 
+const NEWS_ITEMS = [
+  {
+    icon: "🎉",
+    title: "Стена инвайтеров",
+    body: "Пригласи друзей — твой аватар появится в бегущей ленте слева.",
+  },
+  {
+    icon: "🔁",
+    title: "Голосование репостом",
+    body: "Поделись треком в Telegram — добавится +1 к голосу артиста.",
+  },
+  {
+    icon: "📊",
+    title: "Итог недели в канале",
+    body: "Каждое воскресенье 18:00 UTC — топ-3 треков и выбор редакции.",
+  },
+];
+
+function renderNewsSection() {
+  return `
+    <section class="panel news-panel">
+      <div class="section-head section-head--compact">
+        <div>
+          <p class="eyebrow">What's new</p>
+          <h3>Что нового</h3>
+        </div>
+      </div>
+      <div class="news-rail">
+        ${NEWS_ITEMS.map(
+          (item) => `
+            <article class="news-card">
+              <span class="news-icon">${item.icon}</span>
+              <div class="news-text">
+                <strong>${escapeHtml(item.title)}</strong>
+                <span class="muted">${escapeHtml(item.body)}</span>
+              </div>
+            </article>
+          `,
+        ).join("")}
+      </div>
+    </section>
+  `;
+}
+
 function renderHomeView() {
   const topArtists = state.topArtists.slice(0, 5);
   const popularArtists = state.topArtists.slice(5);
   const latestSection = state.latestTracks.length
-    ? renderCompactTracksSection('Недавние релизы', state.latestTracks, 'Пока нет свежих треков', { showArtist: true })
-    : '';
+    ? renderCompactTracksSection(
+        "Недавние релизы",
+        state.latestTracks,
+        "Пока нет свежих треков",
+        { showArtist: true, simple: true },
+      )
+    : "";
 
   return `
+    ${renderNewsSection()}
     ${renderTopArtistsSection(topArtists)}
     ${latestSection}
     ${renderArtistRowsSection(popularArtists)}
@@ -987,11 +1254,11 @@ function renderSearchView() {
     </section>
     ${
       !hasQuery
-        ? ''
+        ? ""
         : state.searchResults.artists.length
           ? `
             <section class="panel compact-section">
-              <div class="artist-list search-result-list">${state.searchResults.artists.map(renderArtistListCard).join('')}</div>
+              <div class="artist-list search-result-list">${state.searchResults.artists.map(renderArtistListCard).join("")}</div>
             </section>
           `
           : `
@@ -1006,8 +1273,8 @@ function renderSearchView() {
 function renderUploadView() {
   if (!isArtist(state.me)) {
     const description = isListener(state.me)
-      ? 'Сейчас твой профиль в режиме слушателя. Загрузка релизов доступна только артистам.'
-      : 'Сначала зайди в кабинет и выбери роль. Загрузка треков открывается только для артистов.';
+      ? "Сейчас твой профиль в режиме слушателя. Загрузка релизов доступна только артистам."
+      : "Сначала зайди в кабинет и выбери роль. Загрузка треков открывается только для артистов.";
 
     return `
       <section class="panel auth-card">
@@ -1032,7 +1299,7 @@ function renderUploadView() {
 
       ${
         state.capabilities.ffmpegReady
-          ? ''
+          ? ""
           : `<div class="status-banner">Сейчас на сервере не найден ffmpeg. Форма готова, но конвертация WAV в MP3 не сработает, пока ffmpeg не будет установлен.</div>`
       }
 
@@ -1042,24 +1309,10 @@ function renderUploadView() {
           <input name="title" placeholder="Например: Night Demo 01" maxlength="80" required />
         </div>
 
-        <div class="field">
-          <label>Жанр</label>
-          <input name="genre" placeholder="Например: melodic trap" maxlength="40" />
-        </div>
-
-        <div class="field">
-          <label>Описание</label>
-          <textarea
-            name="description"
-            placeholder="Коротко опиши настроение, референсы или то, какой фидбек ты хочешь получить."
-            maxlength="500"
-          ></textarea>
-        </div>
-
         <div class="upload-zone">
-          <strong>Загрузи исходник в WAV</strong>
-          <span class="muted">Сервер сохранит WAV и подготовит MP3 для прослушивания другими пользователями.</span>
-          <input name="track" type="file" accept=".wav,audio/wav" required />
+          <strong>Выбери аудиофайл</strong>
+          <span class="muted">WAV или MP3 — сервер сам подготовит версию для прослушивания.</span>
+          <input name="track" type="file" accept=".wav,.mp3,audio/wav,audio/mpeg" required />
         </div>
 
         <button class="btn">Опубликовать демку</button>
@@ -1085,60 +1338,62 @@ function renderArtistProfileView() {
     `;
   }
 
+  const playsCount = Number(artist.playsCount || 0);
+  const tracksArr = profile.tracks || [];
+  const tracksCount = tracksArr.length;
+  const tracksLabel = pluralizeRu(tracksCount, "трек", "трека", "треков");
+
   return `
     <section class="panel artist-profile-panel">
       <div class="artist-row">
-        ${renderAvatar(artist, 'avatar avatar-lg')}
+        ${renderAvatar(artist, "avatar avatar-lg")}
         <div class="profile-head">
           <h2>${escapeHtml(artist.displayName)}</h2>
-          <p class="muted">@${escapeHtml(artist.nickname || artist.username || 'artist')}</p>
+          <p class="muted">@${escapeHtml(artist.nickname || artist.username || "artist")}</p>
         </div>
       </div>
 
-      <p class="track-description">${escapeHtml(artist.bio || 'Артист пока не добавил описание, но его демки и треки уже доступны для прослушивания.')}</p>
+      ${artist.bio ? `<p class="track-description">${escapeHtml(artist.bio)}</p>` : ""}
 
-      <div class="profile-stats artist-profile-stats">
+      <div class="profile-stats artist-profile-stats--duo">
         <div class="stat-tile">
-          <strong>${formatFollowers(artist.playsCount)}</strong>
-          <span class="muted">прослушиваний всего</span>
-        </div>
-        <div class="stat-tile">
-          <strong>${formatFollowers(artist.monthlyPlaysCount)}</strong>
-          <span class="muted">за 30 дней</span>
+          <strong>${formatFollowers(playsCount)}</strong>
+          <span class="muted">${pluralizeRu(playsCount, "прослушивание", "прослушивания", "прослушиваний")}</span>
         </div>
         <div class="stat-tile">
           <strong>${formatFollowers(artist.followersCount)}</strong>
           <span class="muted">подписчиков</span>
         </div>
-        <div class="stat-tile">
-          <strong>${formatFollowers(artist.tracksCount)}</strong>
-          <span class="muted">релизов</span>
-        </div>
       </div>
 
       ${
         artist.id === state.me?.id
-          ? ''
+          ? ""
           : `
             <div class="cta-row artist-profile-actions">
               <button class="btn" data-action="toggle-follow" data-artist-id="${artist.id}">
-                ${artist.isFollowing ? 'Вы подписаны' : 'Подписаться'}
+                ${artist.isFollowing ? "Вы подписаны" : "Подписаться"}
               </button>
             </div>
           `
       }
     </section>
 
-    ${renderCompactTracksSection('Треки', profile.tracks || [], 'У этого артиста пока нет опубликованных релизов', { showArtist: false })}
+    ${renderCompactTracksSection(
+      `${tracksCount} ${tracksLabel}`,
+      tracksArr,
+      "У этого артиста пока нет опубликованных релизов",
+      { showArtist: false, simple: true }
+    )}
   `;
 }
 
-function renderRegisterForm(selectedRole = 'artist') {
+function renderRegisterForm(selectedRole = "artist") {
   return `
     <form class="form-grid" data-form="register">
       <div class="field">
         <label>Выбери роль</label>
-        ${renderRoleOptions('role', selectedRole)}
+        ${renderRoleOptions("role", selectedRole)}
         ${renderRoleChoiceWarning()}
       </div>
       <div class="field">
@@ -1177,7 +1432,7 @@ function renderProfileView() {
           <button class="btn-secondary" data-action="login">Войти</button>
           <button class="btn" data-action="show-register">Регистрация</button>
         </div>
-        ${state.showRegisterForm ? renderRegisterForm('artist') : ''}
+        ${state.showRegisterForm ? renderRegisterForm("artist") : ""}
       </section>
     `;
   }
@@ -1185,16 +1440,16 @@ function renderProfileView() {
   return `
     <section class="panel profile-summary-panel">
       <div class="artist-row">
-        ${renderAvatar(state.me, 'avatar avatar-lg')}
+        ${renderAvatar(state.me, "avatar avatar-lg")}
         <div class="profile-head">
           <h2>${escapeHtml(state.me.displayName)}</h2>
-          <p class="muted">@${escapeHtml(state.me.nickname || state.me.username || 'profile')}</p>
+          <p class="muted">@${escapeHtml(state.me.nickname || state.me.username || "profile")}</p>
         </div>
         <div class="spacer"></div>
         <button class="btn-ghost" data-action="logout">Выйти</button>
       </div>
 
-      ${state.me.bio ? `<p class="track-description">${escapeHtml(state.me.bio)}</p>` : ''}
+      ${state.me.bio ? `<p class="track-description">${escapeHtml(state.me.bio)}</p>` : ""}
 
       <div class="profile-stats clean-profile-stats">
         <div class="stat-tile">
@@ -1218,21 +1473,26 @@ function renderProfileView() {
 
     ${renderInvitePanel()}
 
-    ${state.me.isAdmin ? renderAdminPanel() : ''}
+    ${state.me.isAdmin ? renderAdminPanel() : ""}
 
     ${
       isArtist(state.me)
-        ? renderCompactTracksSection('Релизы', state.me.ownTracks, 'Ты ещё не загрузил ни одного релиза', { showArtist: false })
-        : ''
+        ? renderCompactTracksSection(
+            "Релизы",
+            state.me.ownTracks,
+            "Ты ещё не загрузил ни одного релиза",
+            { showArtist: false },
+          )
+        : ""
     }
 
-    ${renderCompactTracksSection('Лайкнутые треки', state.me.likedTracks, 'Ты пока не лайкнул ни одного трека', { showArtist: true })}
+    ${renderCompactTracksSection("Лайкнутые треки", state.me.likedTracks, "Ты пока не лайкнул ни одного трека", { showArtist: true })}
   `;
 }
 
 function buildInviteLink() {
   const code = state.inviteCode;
-  if (!code) return '';
+  if (!code) return "";
   if (state.botUsername) {
     return `https://t.me/${state.botUsername}/app?startapp=${code}`;
   }
@@ -1240,7 +1500,7 @@ function buildInviteLink() {
 }
 
 function renderInvitePanel() {
-  if (!state.me?.isRegistered || !state.inviteCode) return '';
+  if (!state.me?.isRegistered || !state.inviteCode) return "";
   const link = buildInviteLink();
   return `
     <section class="panel invite-panel">
@@ -1264,37 +1524,37 @@ function renderInvitePanel() {
 }
 
 // =================== INVITE MARQUEE ===================
-let _lastMarqueeKey = '';
+let _lastMarqueeKey = "";
 function mountInviteMarquee() {
   const inviters = Array.isArray(state.topInviters) ? state.topInviters : [];
-  let host = document.getElementById('invite-marquee-host');
+  let host = document.getElementById("invite-marquee-host");
 
   // ничего нет — снимаем
   if (!inviters.length) {
     if (host) host.remove();
-    _lastMarqueeKey = '';
-    document.body.classList.remove('has-invite-marquee');
+    _lastMarqueeKey = "";
+    document.body.classList.remove("has-invite-marquee");
     return;
   }
 
   // ключ для memo: id+count, чтобы при тех же данных не пересоздавать
-  const key = inviters.map((i) => `${i.id}:${i.inviteCount}`).join('|');
+  const key = inviters.map((i) => `${i.id}:${i.inviteCount}`).join("|");
   if (host && key === _lastMarqueeKey) return;
   _lastMarqueeKey = key;
 
   // дублируем список 2 раза для бесшовного цикла
-  const items = [...inviters, ...inviters].map(renderInviterChip).join('');
+  const items = [...inviters, ...inviters].map(renderInviterChip).join("");
 
   // длительность анимации зависит от количества (чтобы скорость была одинаковой)
   const duration = Math.max(20, inviters.length * 4);
 
   if (!host) {
-    host = document.createElement('aside');
-    host.id = 'invite-marquee-host';
-    host.className = 'invite-marquee';
-    host.setAttribute('aria-hidden', 'true');
+    host = document.createElement("aside");
+    host.id = "invite-marquee-host";
+    host.className = "invite-marquee";
+    host.setAttribute("aria-hidden", "true");
     document.body.appendChild(host);
-    document.body.classList.add('has-invite-marquee');
+    document.body.classList.add("has-invite-marquee");
   }
 
   host.innerHTML = `
@@ -1305,8 +1565,11 @@ function mountInviteMarquee() {
 }
 
 function renderInviterChip(inv) {
-  const initial = (inv.displayName || inv.nickname || '?').trim().charAt(0).toUpperCase();
-  const safeName = escapeHtml(inv.displayName || inv.nickname || 'Demo Artist');
+  const initial = (inv.displayName || inv.nickname || "?")
+    .trim()
+    .charAt(0)
+    .toUpperCase();
+  const safeName = escapeHtml(inv.displayName || inv.nickname || "Demo Artist");
   const avatarInner = inv.avatarUrl
     ? `<img src="${escapeHtml(inv.avatarUrl)}" alt="${safeName}" loading="lazy">`
     : `<span class="invite-marquee-initial">${escapeHtml(initial)}</span>`;
@@ -1338,6 +1601,41 @@ function renderAdminPanel() {
   `;
 }
 
+function renderLikedView() {
+  if (!state.me?.isRegistered) {
+    return `
+      <section class="panel auth-card stack">
+        <div>
+          <p class="eyebrow">Favourites</p>
+          <h3>Избранные треки</h3>
+          <p class="muted">Войди в аккаунт, чтобы видеть лайкнутые треки.</p>
+        </div>
+        <div class="cta-row">
+          <button class="btn" data-action="login">Войти</button>
+        </div>
+      </section>
+    `;
+  }
+
+  const liked = state.me.likedTracks || [];
+  return `
+    <section class="panel liked-panel">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">Favourites</p>
+          <h3>Избранные треки</h3>
+        </div>
+        <span class="pill">${liked.length}</span>
+      </div>
+      ${
+        liked.length
+          ? `<div class="compact-track-list">${liked.map((t) => renderCompactTrackCard(t, { showArtist: true, simple: true })).join("")}</div>`
+          : `<div class="empty-state"><strong>Пока пусто</strong><span class="muted">Лайкни трек — он появится здесь.</span></div>`
+      }
+    </section>
+  `;
+}
+
 function renderLoadingView() {
   return `
     <section class="loading-state">
@@ -1348,50 +1646,73 @@ function renderLoadingView() {
   `;
 }
 
-function renderTopbar() {
-  if (!state.me) {
-    elements.topbarMeta.innerHTML = '';
-    return;
+function renderNavAvatar() {
+  const btn = document.querySelector("#nav-profile-btn");
+  if (!btn) return;
+  const me = state.me;
+  if (me?.avatarUrl) {
+    btn.innerHTML = `<span class="nav-avatar"><img src="${escapeHtml(me.avatarUrl)}" alt="" /></span>`;
+  } else if (me?.displayName) {
+    btn.innerHTML = `<span class="nav-avatar nav-avatar--initials">${escapeHtml(getAvatarInitials(me.displayName))}</span>`;
+  } else {
+    btn.innerHTML = `<span class="nav-icon nav-profile" aria-hidden="true"></span>`;
   }
+}
 
-  const roleSummary = state.me.isRegistered ? getRoleLabel(state.me.role) : 'Гость / роль не выбрана';
-  const adminSummary = state.me.isAdmin ? ' · админ' : '';
+function renderTopbar() {
+  elements.topbarMeta.innerHTML = "";
 
-  elements.topbarMeta.innerHTML = `
-    <div class="topbar-meta">
-      <div class="user-chip">
-        ${renderAvatar(state.me, 'avatar avatar-sm')}
-        <div class="meta-col">
-          <strong>${escapeHtml(state.me.displayName)}</strong>
-          <small>${escapeHtml(roleSummary + adminSummary)}</small>
-        </div>
-      </div>
-    </div>
-  `;
+  const titleEl = document.querySelector("#topbar-title");
+  if (!titleEl) return;
+
+  let title = "";
+  switch (state.activeView) {
+    case "home":    title = "Главная"; break;
+    case "search":  title = "Поиск"; break;
+    case "upload":  title = "Загрузка"; break;
+    case "liked":   title = "Избранное"; break;
+    case "profile": title = "Личный кабинет"; break;
+    case "artist": {
+      const a = state.selectedArtist?.artist;
+      title = a
+        ? `Профиль ${escapeHtml(a.nickname || a.username || "артиста")}`
+        : "Профиль артиста";
+      break;
+    }
+    default: title = "";
+  }
+  titleEl.textContent = title;
 }
 
 function render() {
   renderTopbar();
+  renderNavAvatar();
 
-  if (isListener(state.me) && state.activeView === 'upload') {
-    state.activeView = 'profile';
+  if (isListener(state.me) && state.activeView === "upload") {
+    state.activeView = "profile";
   }
 
   elements.navButtons.forEach((button) => {
-    const isSupportButton = button.dataset.action === 'support-toggle';
+    const isSupportButton = button.dataset.action === "support-toggle";
 
-    button.hidden = button.dataset.view === 'upload' && isListener(state.me);
-    button.classList.toggle('is-active', isSupportButton ? state.supportChatOpen : button.dataset.view === state.activeView);
+    button.hidden = button.dataset.view === "upload" && isListener(state.me);
+    button.classList.toggle(
+      "is-active",
+      isSupportButton
+        ? state.supportChatOpen
+        : button.dataset.view === state.activeView,
+    );
     button.disabled = state.pending;
   });
 
   if (elements.navButtons[0]?.parentElement) {
     const bottomNav = elements.navButtons[0].parentElement;
-    const uploadButton = elements.navButtons.find((button) => button.classList.contains('nav-upload-fab'));
+    const uploadButton = elements.navButtons.find((button) =>
+      button.classList.contains("nav-upload-fab"),
+    );
     const hasUploadFab = Boolean(uploadButton && !uploadButton.hidden);
 
-    bottomNav.classList.toggle('has-upload-fab', hasUploadFab);
-    bottomNav.style.gridTemplateColumns = hasUploadFab ? 'repeat(5, 1fr)' : 'repeat(4, 1fr)';
+    bottomNav.classList.toggle("has-upload-fab", hasUploadFab);
   }
 
   if (state.loading) {
@@ -1401,19 +1722,22 @@ function render() {
   }
 
   switch (state.activeView) {
-    case 'search':
+    case "search":
       elements.app.innerHTML = renderSearchView();
       break;
-    case 'upload':
+    case "upload":
       elements.app.innerHTML = renderUploadView();
       break;
-    case 'profile':
+    case "liked":
+      elements.app.innerHTML = renderLikedView();
+      break;
+    case "profile":
       elements.app.innerHTML = renderProfileView();
       break;
-    case 'artist':
+    case "artist":
       elements.app.innerHTML = renderArtistProfileView();
       break;
-    case 'home':
+    case "home":
     default:
       elements.app.innerHTML = renderHomeView();
       break;
@@ -1423,15 +1747,19 @@ function render() {
 }
 
 async function refreshAfterMutation(message) {
-  const currentArtistId = state.activeView === 'artist' ? state.selectedArtist?.artist?.id : null;
+  const currentArtistId =
+    state.activeView === "artist" ? state.selectedArtist?.artist?.id : null;
   await loadBootstrap({ silent: true });
 
-  if (state.activeView === 'search' && state.searchQuery.trim()) {
+  if (state.activeView === "search" && state.searchQuery.trim()) {
     await runSearch(state.searchQuery, { silent: true });
   }
 
   if (currentArtistId) {
-    await openArtistProfile(currentArtistId, { silent: true, rememberReturnView: false });
+    await openArtistProfile(currentArtistId, {
+      silent: true,
+      rememberReturnView: false,
+    });
   }
 
   if (message) {
@@ -1439,16 +1767,16 @@ async function refreshAfterMutation(message) {
   }
 }
 
-document.addEventListener('click', async (event) => {
-  const navButton = event.target.closest('[data-view]');
+document.addEventListener("click", async (event) => {
+  const navButton = event.target.closest("[data-view]");
 
-  if (navButton && navButton.classList.contains('nav-btn')) {
+  if (navButton && navButton.classList.contains("nav-btn")) {
     state.activeView = navButton.dataset.view;
     render();
     return;
   }
 
-  if (event.target.closest('#support-toggle')) {
+  if (event.target.closest("#support-toggle")) {
     if (state.supportChatOpen) {
       closeSupportChat();
     } else {
@@ -1457,12 +1785,17 @@ document.addEventListener('click', async (event) => {
     return;
   }
 
-  if (event.target.closest('#support-backdrop')) {
+  if (event.target.closest("#support-backdrop")) {
     closeSupportChat();
     return;
   }
 
-  const actionTarget = event.target.closest('[data-action]');
+  if (event.target.closest("#track-modal-backdrop")) {
+    closeTrackModal();
+    return;
+  }
+
+  const actionTarget = event.target.closest("[data-action]");
 
   if (!actionTarget) {
     return;
@@ -1470,41 +1803,51 @@ document.addEventListener('click', async (event) => {
 
   const action = actionTarget.dataset.action;
 
-  if (action === 'jump-view') {
+  if (action === "jump-view") {
     state.activeView = actionTarget.dataset.view;
     render();
     return;
   }
 
-  if (action === 'show-register') {
+  if (action === "show-register") {
     state.showRegisterForm = true;
     render();
     return;
   }
 
-  if (action === 'open-artist') {
+  if (action === "open-artist") {
     await openArtistProfile(actionTarget.dataset.artistId);
     return;
   }
 
-  if (action === 'back-artist') {
-    state.activeView = state.artistReturnView || 'home';
+  if (action === "back-artist") {
+    state.activeView = state.artistReturnView || "home";
     render();
     return;
   }
 
-  if (action === 'hide-register') {
+  if (action === "open-track") {
+    await openTrackModal(actionTarget.dataset.trackId);
+    return;
+  }
+
+  if (action === "track-modal-close") {
+    closeTrackModal();
+    return;
+  }
+
+  if (action === "hide-register") {
     state.showRegisterForm = false;
     render();
     return;
   }
 
-  if (action === 'support-close') {
+  if (action === "support-close") {
     closeSupportChat();
     return;
   }
 
-  if (action === 'support-toggle') {
+  if (action === "support-toggle") {
     if (state.supportChatOpen) {
       closeSupportChat();
     } else {
@@ -1513,89 +1856,118 @@ document.addEventListener('click', async (event) => {
     return;
   }
 
-  if (action === 'support-prompt') {
-    state.supportDraft = actionTarget.dataset.message || '';
+  if (action === "support-prompt") {
+    state.supportDraft = actionTarget.dataset.message || "";
     renderSupportDrawer();
-    const textarea = document.querySelector('#support-message-input');
+    const textarea = document.querySelector("#support-message-input");
     textarea?.focus();
     textarea?.setSelectionRange?.(textarea.value.length, textarea.value.length);
     return;
   }
 
-  if (action === 'login') {
+  if (action === "login") {
     await withPending(async () => {
-      const response = await api('/api/session/login', { method: 'POST' });
+      const response = await api("/api/session/login", { method: "POST" });
       showToast(response.message);
     });
     return;
   }
 
-  if (action === 'toggle-like') {
+  if (action === "toggle-like") {
     const trackId = actionTarget.dataset.trackId;
+    const modalTrackId = state.activeTrack ? Number(state.activeTrack.id) : null;
     await withPending(async () => {
-      await api(`/api/tracks/${trackId}/like`, { method: 'POST' });
-      await refreshAfterMutation('Лайк обновлён.');
+      await api(`/api/tracks/${trackId}/like`, { method: "POST" });
+      await refreshAfterMutation("Лайк обновлён.");
+      if (modalTrackId === Number(trackId)) {
+        state.activeTrack = findTrackInState(trackId) || state.activeTrack;
+        renderTrackModal();
+      }
     });
     return;
   }
 
-  if (action === 'toggle-follow') {
+  if (action === "toggle-follow") {
     const artistId = actionTarget.dataset.artistId;
     await withPending(async () => {
-      await api(`/api/artists/${artistId}/follow`, { method: 'POST' });
-      await refreshAfterMutation('Подписка обновлена.');
+      await api(`/api/artists/${artistId}/follow`, { method: "POST" });
+      await refreshAfterMutation("Подписка обновлена.");
     });
     return;
   }
 
-  if (action === 'toggle-artist-top-track') {
+  if (action === "toggle-artist-top-track") {
     event.stopPropagation();
-    const wrapper = actionTarget.closest('.artist-avatar-play');
-    const audio = wrapper?.querySelector('.artist-top-audio');
+    const wrapper = actionTarget.closest(".artist-avatar-play");
+    const audio = wrapper?.querySelector(".artist-top-audio");
     if (!audio) return;
     if (audio.paused) {
       // Pause all other artist top audios
-      document.querySelectorAll('.artist-top-audio').forEach((a) => {
+      document.querySelectorAll(".artist-top-audio").forEach((a) => {
         if (a !== audio) {
           a.pause();
-          a.closest('.artist-avatar-play')?.classList.remove('is-playing');
-          const btn = a.closest('.artist-avatar-play')?.querySelector('.play-overlay');
-          if (btn) btn.textContent = '▶';
+          a.closest(".artist-avatar-play")?.classList.remove("is-playing");
+          const btn = a
+            .closest(".artist-avatar-play")
+            ?.querySelector(".play-overlay");
+          if (btn) btn.textContent = "▶";
         }
       });
       audio.play();
-      wrapper.classList.add('is-playing');
-      actionTarget.textContent = '⏸';
+      wrapper.classList.add("is-playing");
+      actionTarget.textContent = "⏸";
     } else {
       audio.pause();
-      wrapper.classList.remove('is-playing');
-      actionTarget.textContent = '▶';
+      wrapper.classList.remove("is-playing");
+      actionTarget.textContent = "▶";
     }
     return;
   }
 
-  if (action === 'delete-track') {
+  if (action === "delete-track") {
     const trackId = actionTarget.dataset.trackId;
-    const confirmed = window.confirm('Удалить этот трек? Лайки, оценки и комментарии к нему тоже будут удалены.');
+    const confirmed = window.confirm(
+      "Удалить этот трек? Лайки, оценки и комментарии к нему тоже будут удалены.",
+    );
 
     if (!confirmed) {
       return;
     }
 
     await withPending(async () => {
-      await api(`/api/tracks/${trackId}`, { method: 'DELETE' });
-      await refreshAfterMutation('Трек удалён.');
+      await api(`/api/tracks/${trackId}`, { method: "DELETE" });
+      if (state.activeTrack && Number(state.activeTrack.id) === Number(trackId)) {
+        closeTrackModal();
+      }
+      await refreshAfterMutation("Трек удалён.");
     });
     return;
   }
 
-  if (action === 'repost-track') {
+  if (action === "rate-track-modal") {
     const trackId = actionTarget.dataset.trackId;
-    const trackTitle = actionTarget.dataset.trackTitle || 'трек';
-    const artistName = actionTarget.dataset.artistName || '';
+    const score = Number(actionTarget.dataset.score);
     await withPending(async () => {
-      const result = await api(`/api/tracks/${trackId}/repost`, { method: 'POST' });
-      const botUsername = state.botUsername || '';
+      await api(`/api/tracks/${trackId}/rate`, {
+        method: "POST",
+        body: { score },
+      });
+      await refreshAfterMutation("Оценка сохранена.");
+      state.activeTrack = findTrackInState(trackId) || state.activeTrack;
+      renderTrackModal();
+    });
+    return;
+  }
+
+  if (action === "repost-track") {
+    const trackId = actionTarget.dataset.trackId;
+    const trackTitle = actionTarget.dataset.trackTitle || "трек";
+    const artistName = actionTarget.dataset.artistName || "";
+    await withPending(async () => {
+      const result = await api(`/api/tracks/${trackId}/repost`, {
+        method: "POST",
+      });
+      const botUsername = state.botUsername || "";
       const shareUrl = botUsername
         ? `https://t.me/${botUsername}/app?startapp=track_${trackId}`
         : `${window.location.origin}/?track=${trackId}`;
@@ -1604,53 +1976,57 @@ document.addEventListener('click', async (event) => {
       if (tg?.openTelegramLink) {
         tg.openTelegramLink(tgShareLink);
       } else {
-        window.open(tgShareLink, '_blank');
+        window.open(tgShareLink, "_blank");
       }
-      await refreshAfterMutation(result?.alreadyReposted ? 'Уже репостнуто.' : 'Репост засчитан: +1 голос артисту.');
+      await refreshAfterMutation(
+        result?.alreadyReposted
+          ? "Уже репостнуто."
+          : "Репост засчитан: +1 голос артисту.",
+      );
     });
     return;
   }
 
-  if (action === 'copy-invite') {
+  if (action === "copy-invite") {
     const link = actionTarget.dataset.inviteLink || buildInviteLink();
     try {
       await navigator.clipboard.writeText(link);
-      showToast('Ссылка скопирована.');
+      showToast("Ссылка скопирована.");
     } catch (_e) {
-      window.prompt('Скопируй ссылку:', link);
+      window.prompt("Скопируй ссылку:", link);
     }
     return;
   }
 
-  if (action === 'share-invite') {
+  if (action === "share-invite") {
     const link = actionTarget.dataset.inviteLink || buildInviteLink();
-    const shareText = 'Залетай в Demo Stage — мини-апп для демок и треков.';
+    const shareText = "Залетай в Demo Stage — мини-апп для демок и треков.";
     const tgShareLink = `https://t.me/share/url?url=${encodeURIComponent(link)}&text=${encodeURIComponent(shareText)}`;
     if (tg?.openTelegramLink) {
       tg.openTelegramLink(tgShareLink);
     } else {
-      window.open(tgShareLink, '_blank');
+      window.open(tgShareLink, "_blank");
     }
     return;
   }
 
-  if (action === 'post-weekly-summary') {
-    const confirmed = window.confirm('Отправить итог недели в канал сейчас?');
+  if (action === "post-weekly-summary") {
+    const confirmed = window.confirm("Отправить итог недели в канал сейчас?");
     if (!confirmed) return;
     await withPending(async () => {
-      const result = await api('/api/admin/weekly-summary', { method: 'POST' });
+      const result = await api("/api/admin/weekly-summary", { method: "POST" });
       if (result?.posted?.ok === false) {
-        showToast('Ошибка отправки: ' + (result.posted.error || 'неизвестно'));
+        showToast("Ошибка отправки: " + (result.posted.error || "неизвестно"));
       } else {
-        showToast('Итог недели отправлен в канал.');
+        showToast("Итог недели отправлен в канал.");
       }
     });
     return;
   }
 
-  if (action === 'logout') {
+  if (action === "logout") {
     await withPending(async () => {
-      const response = await api('/api/session/logout', { method: 'POST' });
+      const response = await api("/api/session/logout", { method: "POST" });
       showToast(response.message);
 
       if (response.closeMiniApp && tg?.close) {
@@ -1663,7 +2039,7 @@ document.addEventListener('click', async (event) => {
   }
 });
 
-document.addEventListener('submit', async (event) => {
+document.addEventListener("submit", async (event) => {
   const form = event.target;
 
   if (!(form instanceof HTMLFormElement)) {
@@ -1678,52 +2054,56 @@ document.addEventListener('submit', async (event) => {
 
   event.preventDefault();
 
-  if (formType === 'register') {
+  if (formType === "register") {
     await withPending(async () => {
       const data = new FormData(form);
-      const role = String(data.get('role') || 'artist');
-      await api('/api/register', {
-        method: 'POST',
+      const role = String(data.get("role") || "artist");
+      await api("/api/register", {
+        method: "POST",
         body: data,
       });
       state.showRegisterForm = false;
-      state.activeView = 'profile';
-      await refreshAfterMutation(role === 'artist' ? 'Артист-профиль создан.' : 'Профиль слушателя создан.');
+      state.activeView = "profile";
+      await refreshAfterMutation(
+        role === "artist"
+          ? "Артист-профиль создан."
+          : "Профиль слушателя создан.",
+      );
     });
     return;
   }
 
-  if (formType === 'profile') {
+  if (formType === "profile") {
     await withPending(async () => {
       const data = new FormData(form);
-      await api('/api/profile', {
-        method: 'POST',
+      await api("/api/profile", {
+        method: "POST",
         body: data,
       });
-      await refreshAfterMutation('Профиль обновлён.');
+      await refreshAfterMutation("Профиль обновлён.");
     });
     return;
   }
 
-  if (formType === 'upload') {
+  if (formType === "upload") {
     await withPending(async () => {
       const data = new FormData(form);
-      await api('/api/tracks', {
-        method: 'POST',
+      await api("/api/tracks", {
+        method: "POST",
         body: data,
       });
       form.reset();
-      state.activeView = 'profile';
-      await refreshAfterMutation('Трек опубликован.');
+      state.activeView = "profile";
+      await refreshAfterMutation("Трек опубликован.");
     });
     return;
   }
 
-  if (formType === 'support') {
-    const body = trimSupportMessage(new FormData(form).get('body'));
+  if (formType === "support") {
+    const body = trimSupportMessage(new FormData(form).get("body"));
 
     if (!body) {
-      showToast('Напиши вопрос для поддержки.', true);
+      showToast("Напиши вопрос для поддержки.", true);
       return;
     }
 
@@ -1731,14 +2111,14 @@ document.addEventListener('submit', async (event) => {
     render();
 
     try {
-      const response = await api('/api/support/messages', {
-        method: 'POST',
+      const response = await api("/api/support/messages", {
+        method: "POST",
         body: { body },
       });
       state.supportMessages = response.messages || [];
       state.supportLoaded = true;
-      state.supportDraft = '';
-      showToast('Сообщение отправлено в поддержку.');
+      state.supportDraft = "";
+      showToast("Сообщение отправлено в поддержку.");
     } catch (error) {
       showToast(error.message, true);
     } finally {
@@ -1748,86 +2128,120 @@ document.addEventListener('submit', async (event) => {
     return;
   }
 
-  if (formType === 'rating') {
+  if (formType === "rating") {
     const trackId = form.dataset.trackId;
-    const score = Number(new FormData(form).get('score'));
+    const score = Number(new FormData(form).get("score"));
 
     await withPending(async () => {
       await api(`/api/tracks/${trackId}/rate`, {
-        method: 'POST',
+        method: "POST",
         body: { score },
       });
-      await refreshAfterMutation('Оценка сохранена.');
+      await refreshAfterMutation("Оценка сохранена.");
     });
     return;
   }
 
-  if (formType === 'comment') {
+  if (formType === "comment") {
     const trackId = form.dataset.trackId;
-    const body = trimComment(new FormData(form).get('body'));
+    const body = trimComment(new FormData(form).get("body"));
 
     if (!body) {
-      showToast('Напиши комментарий чуть подробнее.', true);
+      showToast("Напиши комментарий чуть подробнее.", true);
       return;
     }
 
     await withPending(async () => {
       await api(`/api/tracks/${trackId}/comments`, {
-        method: 'POST',
+        method: "POST",
         body: { body },
       });
       form.reset();
-      await refreshAfterMutation('Комментарий добавлен.');
+      await refreshAfterMutation("Комментарий добавлен.");
     });
+    return;
+  }
+
+  if (formType === "comment-modal") {
+    const trackId = form.dataset.trackId;
+    const body = trimComment(new FormData(form).get("body"));
+
+    if (!body) {
+      showToast("Напиши комментарий чуть подробнее.", true);
+      return;
+    }
+
+    await withPending(async () => {
+      await api(`/api/tracks/${trackId}/comments`, {
+        method: "POST",
+        body: { body },
+      });
+      form.reset();
+      await refreshAfterMutation("Комментарий добавлен.");
+      state.activeTrack = findTrackInState(trackId) || state.activeTrack;
+      renderTrackModal();
+    });
+    return;
   }
 });
 
 function trimComment(value) {
-  return String(value || '').trim().slice(0, 280);
+  return String(value || "")
+    .trim()
+    .slice(0, 280);
 }
 
 function trimSupportMessage(value) {
-  return String(value || '').trim().slice(0, 500);
+  return String(value || "")
+    .trim()
+    .slice(0, 500);
 }
 
-document.addEventListener('input', (event) => {
+document.addEventListener("input", (event) => {
   const target = event.target;
 
-  if (target instanceof HTMLInputElement && target.id === 'search-input') {
+  if (target instanceof HTMLInputElement && target.id === "search-input") {
     clearTimeout(searchTimer);
     searchTimer = setTimeout(() => {
       void runSearch(target.value);
     }, 260);
   }
 
-  if (target instanceof HTMLTextAreaElement && target.id === 'support-message-input') {
+  if (
+    target instanceof HTMLTextAreaElement &&
+    target.id === "support-message-input"
+  ) {
     state.supportDraft = target.value.slice(0, 500);
   }
 });
 
-document.addEventListener('play', (event) => {
-  const target = event.target;
+document.addEventListener(
+  "play",
+  (event) => {
+    const target = event.target;
 
-  if (!(target instanceof HTMLAudioElement)) {
-    return;
-  }
+    if (!(target instanceof HTMLAudioElement)) {
+      return;
+    }
 
-  const trackId = Number(target.dataset.trackId);
+    const trackId = Number(target.dataset.trackId);
 
-  if (!trackId) {
-    return;
-  }
+    if (!trackId) {
+      return;
+    }
 
-  const previousPlayAt = recentTrackPlays.get(trackId) || 0;
-  const now = Date.now();
+    const previousPlayAt = recentTrackPlays.get(trackId) || 0;
+    const now = Date.now();
 
-  if (now - previousPlayAt < 30_000) {
-    return;
-  }
+    if (now - previousPlayAt < 30_000) {
+      return;
+    }
 
-  recentTrackPlays.set(trackId, now);
-  void api(`/api/tracks/${trackId}/play`, { method: 'POST' }).catch(() => {});
-}, true);
+    recentTrackPlays.set(trackId, now);
+    void api(`/api/tracks/${trackId}/play`, { method: "POST" }).catch(() => {});
+  },
+  true,
+);
 
 loadBootstrap().catch((error) => {
   state.loading = false;
