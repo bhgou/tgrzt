@@ -6,7 +6,7 @@
     <meta name="theme-color" content="#0d1024" />
     <title>Demo Stage</title>
     <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="/styles.css?v=invite-marquee-1" />
+    <link rel="stylesheet" href="/styles.css?v=dock-v2" />
   </head>
   <body>
     <div class="ambient ambient-a"></div>
@@ -35,7 +35,17 @@
             <h1>Demo Stage</h1>
           </div>
         </div>
+        <div id="topbar-title" class="topbar-title"></div>
         <div class="topbar-actions">
+          <button
+            id="support-toggle"
+            class="topbar-support-btn"
+            type="button"
+            data-action="support-toggle"
+            aria-label="Открыть чат поддержки"
+          >
+            <span class="nav-icon nav-support" aria-hidden="true"></span>
+          </button>
           <div id="topbar-meta"></div>
         </div>
       </header>
@@ -59,27 +69,28 @@
           <span class="nav-icon nav-note" aria-hidden="true"></span>
           <span>Залить</span>
         </button>
-        <button class="nav-btn" data-view="profile">
-          <span class="nav-icon nav-profile" aria-hidden="true"></span>
-          <span>Кабинет</span>
+        <button class="nav-btn" data-view="liked">
+          <span class="nav-icon nav-heart" aria-hidden="true"></span>
+          <span>Избранное</span>
         </button>
         <button
-          class="nav-btn nav-support-btn"
-          type="button"
-          data-action="support-toggle"
-          aria-label="Открыть чат поддержки"
+          class="nav-btn nav-profile-btn"
+          data-view="profile"
+          id="nav-profile-btn"
+          aria-label="Кабинет"
         >
-          <span class="nav-icon nav-support" aria-hidden="true"></span>
-          <span>Чат</span>
+          <span class="nav-icon nav-profile" aria-hidden="true"></span>
         </button>
       </nav>
     </div>
 
     <div id="support-backdrop" class="support-backdrop"></div>
     <aside id="support-drawer" class="support-drawer"></aside>
+    <div id="track-modal-backdrop" class="track-modal-backdrop"></div>
+    <aside id="track-modal" class="track-modal" aria-hidden="true"></aside>
     <div id="toast" class="toast"></div>
 
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
-    <script type="module" src="/app.js?v=invite-marquee-1"></script>
+    <script type="module" src="/app.js?v=dock-v2"></script>
   </body>
 </html>
