@@ -1,42 +1,25 @@
-const tg = window.Telegram?.WebApp;
-tg?.ready?.();
-tg?.expand?.();
-tg?.setHeaderColor?.("#0d1024");
-tg?.setBackgroundColor?.("#0d1024");
+import { api as apiRequest } from './api.js';
+import { state as initialState } from './state.js';
+import { escapeHtml, formatDate, formatDateTime, formatFollowers, pluralizeRu } from './ui-utils.js';
 
-const state = {
-  activeView: "home",
-  artistReturnView: "home",
-  loading: true,
-  pending: false,
-  supportChatOpen: false,
-  supportLoaded: false,
-  supportLoading: false,
-  supportMessages: [],
-  supportDraft: "",
-  showRegisterForm: false,
-  me: null,
-  selectedArtist: null,
-  featuredTracks: [],
-  latestTracks: [],
-  topArtists: [],
-  platformStats: null,
-  inviteCode: null,
-  botUsername: "",
-  pendingInviteCode: null,
-  topInviters: [],
-  searchQuery: "",
-  searchResults: {
-    artists: [],
-    tracks: [],
-  },
-  capabilities: {
-    ffmpegReady: false,
-    botConfigured: false,
-  },
-  activeTrack: null,
-  activeTrackPending: false,
-};
+const tg = window.Telegram?.WebApp;
+const state = initialState;
+const api = apiRequest;
+
+async function start() {
+  tg?.ready?.();
+  tg?.expand?.();
+  tg?.setHeaderColor?.("#0d1024");
+  tg?.setBackgroundColor?.("#0d1024");
+
+  try {
+    await loadBootstrap();
+  } catch (error) {
+    state.loading = false;
+    render();
+    showToast(error.message, true);
+  }
+}
 
 // Extract invite code from Telegram start_param or URL ?invite=
 (function extractInviteCode() {
@@ -73,54 +56,8 @@ let toastTimer = null;
 let searchTimer = null;
 const recentTrackPlays = new Map();
 
-function escapeHtml(value) {
-  return String(value ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
-}
-
-function formatDate(dateString) {
-  if (!dateString) {
-    return "";
-  }
-
-  return new Intl.DateTimeFormat("ru-RU", {
-    day: "2-digit",
-    month: "short",
-  }).format(new Date(dateString));
-}
-
-function formatDateTime(dateString) {
-  if (!dateString) {
-    return "";
-  }
-
-  return new Intl.DateTimeFormat("ru-RU", {
-    day: "2-digit",
-    month: "short",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(new Date(dateString));
-}
-
 function formatRating(value) {
   return Number(value || 0).toFixed(1);
-}
-
-function formatFollowers(value) {
-  return new Intl.NumberFormat("ru-RU").format(Number(value || 0));
-}
-
-function pluralizeRu(n, one, few, many) {
-  const abs = Math.abs(Math.trunc(n)) % 100;
-  const mod10 = abs % 10;
-  if (abs > 10 && abs < 20) return many;
-  if (mod10 === 1) return one;
-  if (mod10 >= 2 && mod10 <= 4) return few;
-  return many;
 }
 
 function getViewLabel(view) {
@@ -182,6 +119,27 @@ function getRoleDescription(role) {
   return "Профиль ещё не завершён.";
 }
 
+function getArtistLabel(artist) {
+  if (!artist) {
+    return "Исполнитель";
+  }
+
+  const name =
+    artist.displayName ||
+    artist.nickname ||
+    artist.username ||
+    [artist.firstName, artist.lastName].filter(Boolean).join(" ");
+
+  return name ? String(name).trim() : "Исполнитель";
+}
+
+function formatTime(seconds) {
+  const secs = Math.max(0, Math.floor(Number(seconds) || 0));
+  const minutes = Math.floor(secs / 60);
+  const remainder = secs % 60;
+  return `${minutes}:${String(remainder).padStart(2, "0")}`;
+}
+
 function isArtist(user) {
   return user?.role === "artist";
 }
@@ -221,35 +179,7 @@ function showToast(message, isError = false) {
   }, 3200);
 }
 
-async function api(path, options = {}) {
-  const headers = new Headers(options.headers || {});
-  const initData = tg?.initData || "";
-
-  if (initData) {
-    headers.set("X-Telegram-Init-Data", initData);
-  }
-
-  let body = options.body;
-
-  if (body && !(body instanceof FormData) && typeof body === "object") {
-    headers.set("Content-Type", "application/json");
-    body = JSON.stringify(body);
-  }
-
-  const response = await fetch(path, {
-    method: options.method || "GET",
-    headers,
-    body,
-  });
-
-  const data = await response.json().catch(() => ({}));
-
-  if (!response.ok) {
-    throw new Error(data.error || "Запрос завершился с ошибкой.");
-  }
-
-  return data;
-}
+// api helper already imported
 
 async function withPending(task, successMessage) {
   state.pending = true;
@@ -488,12 +418,17 @@ function renderTrackCard(track) {
     )
     .join("");
 
+  const miniCoverHtml = track.coverUrl
+    ? `<div class="mini-square-cover"><img src="${track.coverUrl}" alt="" /></div>`
+    : "";
+
   return `
     <article class="track-card">
       <div class="track-head">
-        <div>
+        ${miniCoverHtml}
+        <div style="flex:1; min-width:0;">
           <p class="eyebrow">${formatDate(track.createdAt) || "Свежий релиз"}</p>
-          <h4>${escapeHtml(track.title)}</h4>
+          <h4 style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin:0;">${escapeHtml(track.title)}</h4>
           <span class="pill pill-genre">${escapeHtml(track.genre || "Demo tape")}</span>
         </div>
         <span class="rating-pill">${formatRating(track.averageRating)} / 10</span>
@@ -749,13 +684,17 @@ function renderTrackModal() {
   }).join("");
 
   const comments = (track.comments || []).slice(0, 30);
+  const miniCoverHtml = track.coverUrl
+    ? `<div class="mini-square-cover"><img src="${track.coverUrl}" alt="" /></div>`
+    : "";
 
   elements.trackModal.innerHTML = `
     <div class="track-modal-head">
-      <div>
+      ${miniCoverHtml}
+      <div class="head-info">
         <p class="eyebrow">Трек</p>
         <h3>${escapeHtml(track.title)}</h3>
-        <span class="muted">@${escapeHtml(track.artist.nickname || track.artist.username || "artist")} · ${escapeHtml(track.genre || "Релиз")}</span>
+        <span class="muted">${escapeHtml(getArtistLabel(track.artist))} · ${escapeHtml(track.genre || "Релиз")}</span>
       </div>
       <button class="support-close" type="button" data-action="track-modal-close" aria-label="Закрыть">✕</button>
     </div>
@@ -948,6 +887,39 @@ function renderCompactTrackCard(track, options = {}) {
         }
       </div>
     </article>
+  `;
+}
+
+function renderTrackGridCard(track) {
+  const coverHtml = track.coverUrl
+    ? `<span class="avatar"><img src="${track.coverUrl}" alt="${escapeHtml(track.title)}" /></span>`
+    : renderAvatar(track.artist, "avatar");
+
+  return `
+    <article class="release-card" data-action="open-track" data-track-id="${track.id}">
+      ${coverHtml}
+      <div class="release-card-info">
+        <strong>${escapeHtml(track.title)}</strong>
+        <span class="muted">@${escapeHtml(track.artist.nickname || track.artist.username || "artist")}</span>
+      </div>
+    </article>
+  `;
+}
+
+function renderTrackGridSection(title, tracks, emptyMessage) {
+  return `
+    <section class="panel">
+      <div class="section-head">
+        <div>
+          <h3>${escapeHtml(title)}</h3>
+        </div>
+      </div>
+      ${
+        tracks.length
+          ? `<div class="release-grid">${tracks.map(renderTrackGridCard).join("")}</div>`
+          : `<div class="empty-state"><strong>${escapeHtml(emptyMessage)}</strong></div>`
+      }
+    </section>
   `;
 }
 
@@ -1173,46 +1145,178 @@ function renderProfileStats(user) {
   `;
 }
 
-const NEWS_ITEMS = [
-  {
-    icon: "🎉",
-    title: "Стена инвайтеров",
-    body: "Пригласи друзей — твой аватар появится в бегущей ленте слева.",
-  },
-  {
-    icon: "🔁",
-    title: "Голосование репостом",
-    body: "Поделись треком в Telegram — добавится +1 к голосу артиста.",
-  },
-  {
-    icon: "📊",
-    title: "Итог недели в канале",
-    body: "Каждое воскресенье 18:00 UTC — топ-3 треков и выбор редакции.",
-  },
-];
 
-function renderNewsSection() {
+async function loadBattles() {
+  state.pending = true;
+  render();
+  try {
+    const response = await api("/api/battles");
+    state.activeBattles = response.battles || [];
+  } catch (error) {
+    showToast(error.message, true);
+  } finally {
+    state.pending = false;
+    render();
+  }
+}
+
+async function loadLeaderboard() {
+  state.pending = true;
+  render();
+  try {
+    const response = await api("/api/leaderboard");
+    state.leaderboard = response.tracks || [];
+  } catch (error) {
+    showToast(error.message, true);
+  } finally {
+    state.pending = false;
+    render();
+  }
+}
+
+async function voteInBattle(battleId, votedTrackId) {
+  await withPending(async () => {
+    await api(`/api/battles/${battleId}/vote`, {
+      method: "POST",
+      body: { votedTrackId }
+    });
+    showToast("Голос принят!");
+    await loadBattles();
+  });
+}
+
+function renderArenaView() {
+  const activeTab = state.arenaTab || "battles";
+
   return `
-    <section class="panel news-panel">
-      <div class="section-head section-head--compact">
+    <section class="panel stack">
+      <div class="section-head">
         <div>
-          <p class="eyebrow">What's new</p>
-          <h3>Что нового</h3>
+          <p class="eyebrow">Battle Arena</p>
+          <h3>Арена</h3>
         </div>
       </div>
-      <div class="news-rail">
-        ${NEWS_ITEMS.map(
-          (item) => `
-            <article class="news-card">
-              <span class="news-icon">${item.icon}</span>
-              <div class="news-text">
-                <strong>${escapeHtml(item.title)}</strong>
-                <span class="muted">${escapeHtml(item.body)}</span>
+
+      <div class="tab-switcher">
+        <button class="tab-btn ${activeTab === "battles" ? "is-active" : ""}" data-action="switch-arena-tab" data-tab="battles">Батттлы</button>
+        <button class="tab-btn ${activeTab === "leaderboard" ? "is-active" : ""}" data-action="switch-arena-tab" data-tab="leaderboard">Рейтинг ELO</button>
+      </div>
+      
+      ${
+        activeTab === "battles"
+          ? `
+        <div class="battle-list">
+          ${state.activeBattles.length ? "" : '<div class="empty-state"><strong>Пока нет активных баттлов</strong><span class="muted">Заходи позже, когда появятся новые пары.</span></div>'}
+          ${state.activeBattles.map(battle => `
+            <article class="battle-card">
+              <div class="battle-card-header">
+                <div>
+                  <span class="battle-genre-tag">${escapeHtml(battle.genre)}</span>
+                  <h3>${escapeHtml(battle.trackA.title)} vs ${escapeHtml(battle.trackB.title)}</h3>
+                </div>
+                <span class="battle-status ${battle.hasVoted ? 'is-voted' : ''}">${battle.hasVoted ? 'Голос отдан' : 'Голосуй сейчас'}</span>
+              </div>
+              <div class="battle-vs-container">
+                <div class="battle-side ${battle.hasVoted ? 'is-voted' : ''}">
+                  <div class="battle-track-card">
+                    <div class="battle-track-thumb">
+                      ${battle.trackA.coverUrl ? `<img src="${battle.trackA.coverUrl}" alt="${escapeHtml(battle.trackA.title)}" />` : '<span class="avatar-placeholder">🎵</span>'}
+                    </div>
+                    <div class="battle-track-meta">
+                      <span class="eyebrow">Трек A</span>
+                      <strong>${escapeHtml(battle.trackA.title)}</strong>
+                      <span class="battle-artist">Исполнитель: ${escapeHtml(getArtistLabel(battle.trackA.artist))}</span>
+                    </div>
+                  </div>
+                  <div class="battle-player">
+                    <audio class="battle-audio" preload="metadata" data-track-id="${battle.trackA.id}" src="${battle.trackA.mp3Url}"></audio>
+                    <div class="battle-player-controls">
+                      <button type="button" class="battle-play-toggle" data-action="battle-toggle-play" data-track-id="${battle.trackA.id}" aria-label="Play/Pause">▶</button>
+                      <div class="battle-player-progress">
+                        <span class="battle-player-time" data-player-time="${battle.trackA.id}">0:00</span>
+                        <input type="range" min="0" max="100" value="0" class="battle-seek" data-action="battle-seek" data-track-id="${battle.trackA.id}" />
+                        <span class="battle-player-duration" data-player-duration="${battle.trackA.id}">0:00</span>
+                      </div>
+                      <div class="battle-player-volume">
+                        <span class="battle-volume-icon">🔊</span>
+                        <input type="range" min="0" max="1" step="0.01" value="${state.player.volume}" class="battle-volume-slider" data-action="battle-volume" data-track-id="${battle.trackA.id}" />
+                      </div>
+                    </div>
+                  </div>
+                  <button class="btn battle-vote-btn ${battle.hasVoted ? 'btn-ghost' : ''}" 
+                    data-action="vote-battle" 
+                    data-battle-id="${battle.id}" 
+                    data-track-id="${battle.trackA.id}"
+                    ${battle.hasVoted ? 'disabled' : ''}>
+                    ${battle.hasVoted ? 'Голос отдан' : 'Выбрать A'}
+                  </button>
+                </div>
+
+                <div class="vs-divider">VS</div>
+
+                <div class="battle-side ${battle.hasVoted ? 'is-voted' : ''}">
+                  <div class="battle-track-card">
+                    <div class="battle-track-thumb">
+                      ${battle.trackB.coverUrl ? `<img src="${battle.trackB.coverUrl}" alt="${escapeHtml(battle.trackB.title)}" />` : '<span class="avatar-placeholder">🎵</span>'}
+                    </div>
+                    <div class="battle-track-meta">
+                      <span class="eyebrow">Трек B</span>
+                      <strong>${escapeHtml(battle.trackB.title)}</strong>
+                      <span class="battle-artist">Исполнитель: ${escapeHtml(getArtistLabel(battle.trackB.artist))}</span>
+                    </div>
+                  </div>
+                  <div class="battle-player">
+                    <audio class="battle-audio" preload="metadata" data-track-id="${battle.trackB.id}" src="${battle.trackB.mp3Url}"></audio>
+                    <div class="battle-player-controls">
+                      <button type="button" class="battle-play-toggle" data-action="battle-toggle-play" data-track-id="${battle.trackB.id}" aria-label="Play/Pause">▶</button>
+                      <div class="battle-player-progress">
+                        <span class="battle-player-time" data-player-time="${battle.trackB.id}">0:00</span>
+                        <input type="range" min="0" max="100" value="0" class="battle-seek" data-action="battle-seek" data-track-id="${battle.trackB.id}" />
+                        <span class="battle-player-duration" data-player-duration="${battle.trackB.id}">0:00</span>
+                      </div>
+                      <div class="battle-player-volume">
+                        <span class="battle-volume-icon">🔊</span>
+                        <input type="range" min="0" max="1" step="0.01" value="${state.player.volume}" class="battle-volume-slider" data-action="battle-volume" data-track-id="${battle.trackB.id}" />
+                      </div>
+                    </div>
+                  </div>
+                  <button class="btn battle-vote-btn ${battle.hasVoted ? 'btn-ghost' : ''}" 
+                    data-action="vote-battle" 
+                    data-battle-id="${battle.id}" 
+                    data-track-id="${battle.trackB.id}"
+                    ${battle.hasVoted ? 'disabled' : ''}>
+                    ${battle.hasVoted ? 'Голос отдан' : 'Выбрать B'}
+                  </button>
+                </div>
+              </div>
+              <div class="battle-footer">
+                <span class="muted">Заканчивается: ${formatDateTime(battle.expiresAt)}</span>
               </div>
             </article>
-          `,
-        ).join("")}
-      </div>
+          `).join('')}
+        </div>
+      `
+          : `
+        <div class="leaderboard-list">
+          ${state.leaderboard.map((track, index) => `
+            <div class="leaderboard-item" data-action="open-track" data-track-id="${track.id}">
+              <span class="rank">${index + 1}</span>
+              <div class="mini-square-cover">
+                ${track.coverUrl ? `<img src="${track.coverUrl}" />` : '<span class="avatar-placeholder">🎵</span>'}
+              </div>
+              <div class="track-meta">
+                <strong>${escapeHtml(track.title)}</strong>
+                <span class="muted">@${escapeHtml(track.artist.nickname)} · ${escapeHtml(track.genre)}</span>
+              </div>
+              <div class="elo-score">
+                <strong>${track.elo}</strong>
+                <small>ELO</small>
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      `
+      }
     </section>
   `;
 }
@@ -1220,20 +1324,185 @@ function renderNewsSection() {
 function renderHomeView() {
   const topArtists = state.topArtists.slice(0, 5);
   const popularArtists = state.topArtists.slice(5);
+  
+  // Find top ELO track for the winner block
+  const topEloTrack = state.leaderboard?.[0];
+  const winnerSection = topEloTrack ? `
+    <section class="panel winner-panel">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">Current Champion</p>
+          <h3>Лидер рейтинга Elo</h3>
+        </div>
+      </div>
+      <div class="winner-card" data-action="open-track" data-track-id="${topEloTrack.id}">
+        <div class="winner-crown">👑</div>
+        ${topEloTrack.coverUrl ? `<img src="${topEloTrack.coverUrl}" class="winner-bg" />` : ''}
+        <div class="winner-info">
+          <div class="mini-square-cover">
+            ${topEloTrack.coverUrl ? `<img src="${topEloTrack.coverUrl}" />` : '🎵'}
+          </div>
+          <div>
+            <strong>${escapeHtml(topEloTrack.title)}</strong>
+            <span class="muted">@${escapeHtml(topEloTrack.artist.nickname)}</span>
+          </div>
+          <div class="elo-badge">${topEloTrack.elo} ELO</div>
+        </div>
+      </div>
+    </section>
+  ` : "";
+
+  const activeBattle = state.activeBattles?.[0];
+  const activeBattleSection = activeBattle ? `
+    <section class="panel compact-panel">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">Demo Battle</p>
+          <h3>Текущий баттл (${escapeHtml(activeBattle.genre)})</h3>
+        </div>
+      </div>
+      <article class="battle-card" style="margin-top: 12px; cursor: pointer;" onclick="document.querySelector('[data-view=battle]').click()">
+        <div class="battle-vs-container" style="pointer-events: none;">
+          <div class="battle-side">
+            <div class="battle-track-info">
+              <strong>Track A</strong>
+            </div>
+          </div>
+          <div class="vs-divider">VS</div>
+          <div class="battle-side">
+            <div class="battle-track-info">
+              <strong>Track B</strong>
+            </div>
+          </div>
+        </div>
+        <div class="cta-row" style="margin-top: 16px;">
+          <button class="btn" type="button">Проголосовать на Арене</button>
+        </div>
+      </article>
+    </section>
+  ` : "";
+
+  const hallOfFame = state.hallOfFame?.recentWinners || [];
+  const hallOfFameSection = hallOfFame.length ? `
+    <section class="panel compact-panel">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">Hall of Fame</p>
+          <h3>Зал славы (Победители баттлов)</h3>
+        </div>
+      </div>
+      <div class="compact-track-list" style="margin-top: 12px;">
+        ${hallOfFame.map(t => `
+          <div class="compact-track">
+            <div class="mini-square-cover">
+              ${t.coverUrl ? `<img src="${t.coverUrl}" />` : '🎵'}
+            </div>
+            <div class="track-meta">
+              <strong>${escapeHtml(t.title)}</strong>
+              <span class="muted">@${escapeHtml(t.artistNickname)} · ${escapeHtml(t.genre)}</span>
+            </div>
+            <div class="elo-score">
+              <strong>👑</strong>
+            </div>
+          </div>
+        `).join('')}
+      </div>
+    </section>
+  ` : "";
+
   const latestSection = state.latestTracks.length
-    ? renderCompactTracksSection(
+    ? renderTrackGridSection(
         "Недавние релизы",
         state.latestTracks,
         "Пока нет свежих треков",
-        { showArtist: true, simple: true },
       )
     : "";
 
+  const searchSection = `
+    <section class="panel search-minimal">
+      <div class="field">
+        <input
+          id="search-input"
+          name="search"
+          type="search"
+          placeholder="Поиск артиста или трека"
+          value="${escapeHtml(state.searchQuery)}"
+        />
+      </div>
+    </section>
+  `;
+
+  const searchResultsSection = state.searchQuery.trim()
+    ? state.searchResults.artists.length
+      ? `
+        <section class="panel compact-section">
+          <div class="artist-list search-result-list">${state.searchResults.artists.map(renderArtistListCard).join("")}</div>
+        </section>
+      `
+      : `
+        <section class="panel compact-section">
+          <div class="empty-state"><strong>Ничего не найдено</strong></div>
+        </section>
+      `
+    : "";
+
   return `
-    ${renderNewsSection()}
-    ${renderTopArtistsSection(topArtists)}
-    ${latestSection}
-    ${renderArtistRowsSection(popularArtists)}
+    <div class="view-content stack">
+      ${searchSection}
+      ${searchResultsSection}
+      ${activeBattleSection}
+      ${winnerSection}
+      ${hallOfFameSection}
+      ${renderNewsSection()}
+      ${renderTopArtistsSection(topArtists)}
+      ${latestSection}
+    </div>
+  `;
+}
+
+function renderNewsSection() {
+  if (!state.news?.length) return "";
+  return `
+    <section class="panel compact-panel">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">Announcements</p>
+          <h3>Новости</h3>
+        </div>
+        <button class="btn-ghost" data-action="jump-view" data-view="news">Все новости</button>
+      </div>
+      <div class="news-list" style="margin-top: 12px;">
+        ${state.news.slice(0, 2).map(n => `
+          <div class="news-card">
+            <h4>${escapeHtml(n.title)}</h4>
+            <div class="news-meta">${formatDate(n.createdAt)}</div>
+            <div class="news-body">${escapeHtml(n.body.length > 100 ? n.body.slice(0, 100) + '...' : n.body)}</div>
+          </div>
+        `).join('')}
+      </div>
+    </section>
+  `;
+}
+
+function renderNewsView() {
+  return `
+    <section class="panel stack">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">Latest news</p>
+          <h3>Все новости</h3>
+        </div>
+      </div>
+      <div class="news-list">
+        ${(state.news || []).map(n => `
+          <div class="news-card">
+            <h4>${escapeHtml(n.title)}</h4>
+            <div class="news-meta">${formatDateTime(n.createdAt)}</div>
+            <div class="news-body">${escapeHtml(n.body)}</div>
+          </div>
+        `).join('')}
+      </div>
+    </section>
   `;
 }
 
@@ -1281,9 +1550,9 @@ function renderUploadView() {
         <p class="eyebrow">Upload locked</p>
         <h3>Загрузка доступна только артистам</h3>
         <p class="muted">${escapeHtml(description)}</p>
-        <div class="cta-row">
-          <button class="btn" data-action="jump-view" data-view="profile">Перейти в кабинет</button>
-        </div>
+          <div class="cta-row">
+            <button class="btn" onclick="window.open('/admin.html', '_blank')">Открыть админку</button>
+          </div>
       </section>
     `;
   }
@@ -1309,6 +1578,19 @@ function renderUploadView() {
           <input name="title" placeholder="Например: Night Demo 01" maxlength="80" required />
         </div>
 
+        <div class="field">
+          <label>Жанр релиза</label>
+          <select name="genre" required>
+            ${(state.genres || ['Hip-Hop', 'Electronic', 'Pop', 'Rock', 'Indie', 'Phonk', 'R&B', 'Lo-Fi', 'Techno'])
+              .map(g => `<option value="${escapeHtml(g)}">${escapeHtml(g)}</option>`).join('')}
+          </select>
+        </div>
+
+        <div class="field">
+          <label>Обложка (рекомендуется 1400x1400)</label>
+          <input name="cover" type="file" accept="image/*" />
+        </div>
+
         <div class="upload-zone">
           <strong>Выбери аудиофайл</strong>
           <span class="muted">WAV или MP3 — сервер сам подготовит версию для прослушивания.</span>
@@ -1331,9 +1613,9 @@ function renderArtistProfileView() {
         <p class="eyebrow">Artist not found</p>
         <h3>Профиль артиста пока недоступен</h3>
         <p class="muted">Открой поиск или главную и попробуй выбрать артиста снова.</p>
-        <div class="cta-row">
-          <button class="btn" data-action="jump-view" data-view="search">Перейти в поиск</button>
-        </div>
+          <div class="cta-row">
+            <button class="btn" onclick="window.open('/admin.html', '_blank')">Открыть админку</button>
+          </div>
       </section>
     `;
   }
@@ -1344,47 +1626,45 @@ function renderArtistProfileView() {
   const tracksLabel = pluralizeRu(tracksCount, "трек", "трека", "треков");
 
   return `
-    <section class="panel artist-profile-panel">
-      <div class="artist-row">
-        ${renderAvatar(artist, "avatar avatar-lg")}
-        <div class="profile-head">
-          <h2>${escapeHtml(artist.displayName)}</h2>
-          <p class="muted">@${escapeHtml(artist.nickname || artist.username || "artist")}</p>
+    <div class="view-content stack">
+      <section class="panel artist-profile-panel">
+        <div class="artist-row">
+          ${renderAvatar(artist, "avatar avatar-lg")}
+          <div class="profile-head">
+            <h2>${escapeHtml(artist.displayName)}</h2>
+            <p class="muted">@${escapeHtml(artist.nickname || artist.username || "artist")}</p>
+          </div>
         </div>
-      </div>
 
-      ${artist.bio ? `<p class="track-description">${escapeHtml(artist.bio)}</p>` : ""}
+        ${artist.bio ? `<p class="track-description">${escapeHtml(artist.bio)}</p>` : ""}
 
-      <div class="profile-stats artist-profile-stats--duo">
-        <div class="stat-tile">
-          <strong>${formatFollowers(playsCount)}</strong>
-          <span class="muted">${pluralizeRu(playsCount, "прослушивание", "прослушивания", "прослушиваний")}</span>
+        <div class="profile-stats-text">
+          <span><strong>${formatFollowers(playsCount)}</strong> ${pluralizeRu(playsCount, "прослушивание", "прослушивания", "прослушиваний")}</span>
+          <span><strong>${formatFollowers(artist.followersCount)}</strong> подписчиков</span>
+          <span><strong>${artist.totalElo || 0}</strong> Elo</span>
+          <span><strong>#${artist.globalRank || '?'}</strong> рейтинг</span>
         </div>
-        <div class="stat-tile">
-          <strong>${formatFollowers(artist.followersCount)}</strong>
-          <span class="muted">подписчиков</span>
-        </div>
-      </div>
 
-      ${
-        artist.id === state.me?.id
-          ? ""
-          : `
-            <div class="cta-row artist-profile-actions">
-              <button class="btn" data-action="toggle-follow" data-artist-id="${artist.id}">
-                ${artist.isFollowing ? "Вы подписаны" : "Подписаться"}
-              </button>
-            </div>
-          `
-      }
-    </section>
+        ${
+          artist.id === state.me?.id
+            ? ""
+            : `
+              <div class="cta-row artist-profile-actions">
+                <button class="btn" data-action="toggle-follow" data-artist-id="${artist.id}">
+                  ${artist.isFollowing ? "Вы подписаны" : "Подписаться"}
+                </button>
+              </div>
+            `
+        }
+      </section>
 
-    ${renderCompactTracksSection(
-      `${tracksCount} ${tracksLabel}`,
-      tracksArr,
-      "У этого артиста пока нет опубликованных релизов",
-      { showArtist: false, simple: true }
-    )}
+      ${renderCompactTracksSection(
+        `${tracksCount} ${tracksLabel}`,
+        tracksArr,
+        "У этого артиста пока нет опубликованных релизов",
+        { showArtist: false, simple: true }
+      )}
+    </div>
   `;
 }
 
@@ -1438,55 +1718,62 @@ function renderProfileView() {
   }
 
   return `
-    <section class="panel profile-summary-panel">
-      <div class="artist-row">
-        ${renderAvatar(state.me, "avatar avatar-lg")}
-        <div class="profile-head">
-          <h2>${escapeHtml(state.me.displayName)}</h2>
-          <p class="muted">@${escapeHtml(state.me.nickname || state.me.username || "profile")}</p>
+    <div class="view-content stack">
+      <section class="panel profile-summary-panel">
+        <div class="artist-row">
+          ${renderAvatar(state.me, "avatar avatar-lg")}
+          <div class="profile-head">
+            <h2>${escapeHtml(state.me.displayName)}</h2>
+            <p class="muted">@${escapeHtml(state.me.nickname || state.me.username || "profile")}</p>
+          </div>
+          <div class="spacer"></div>
+          <button class="btn-ghost" data-action="logout">Выйти</button>
         </div>
-        <div class="spacer"></div>
-        <button class="btn-ghost" data-action="logout">Выйти</button>
-      </div>
 
-      ${state.me.bio ? `<p class="track-description">${escapeHtml(state.me.bio)}</p>` : ""}
+        ${state.me.bio ? `<p class="track-description">${escapeHtml(state.me.bio)}</p>` : ""}
 
-      <div class="profile-stats clean-profile-stats">
-        <div class="stat-tile">
-          <strong>${formatFollowers(state.me.followersCount)}</strong>
-          <span class="muted">подписчиков</span>
+        <div class="profile-stats-text">
+          <span><strong>${formatFollowers(state.me.followersCount)}</strong> подписчиков</span>
+          <span><strong>${formatFollowers(state.me.tracksCount)}</strong> релизов</span>
+          ${isArtist(state.me) ? `
+            <span><strong>${state.me.totalElo || 0}</strong> Elo</span>
+            <span><strong>#${state.me.globalRank || '?'}</strong> рейтинг</span>
+          ` : `
+            <span><strong>${formatFollowers(state.me.followingCount)}</strong> подписок</span>
+            <span><strong>${formatFollowers(state.me.likedTracksCount)}</strong> лайков</span>
+          `}
         </div>
-        <div class="stat-tile">
-          <strong>${formatFollowers(state.me.tracksCount)}</strong>
-          <span class="muted">релизов</span>
-        </div>
-        <div class="stat-tile">
-          <strong>${formatFollowers(state.me.followingCount)}</strong>
-          <span class="muted">подписок</span>
-        </div>
-        <div class="stat-tile">
-          <strong>${formatFollowers(state.me.likedTracksCount)}</strong>
-          <span class="muted">лайкнутых треков</span>
-        </div>
-      </div>
-    </section>
+      </section>
 
-    ${renderInvitePanel()}
+      ${renderInvitePanel()}
 
-    ${state.me.isAdmin ? renderAdminPanel() : ""}
+      ${state.me.isAdmin ? `
+        <section class="panel admin-cta-panel">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">Admin tools</p>
+              <h3>Панель управления</h3>
+              <p class="muted">Инструменты для модерации контента и пользователей.</p>
+            </div>
+          </div>
+          <div class="cta-row">
+            <button class="btn" onclick="window.open('/admin.html', '_blank')">Открыть админку</button>
+          </div>
+        </section>
+      ` : ""}
 
-    ${
-      isArtist(state.me)
-        ? renderCompactTracksSection(
-            "Релизы",
-            state.me.ownTracks,
-            "Ты ещё не загрузил ни одного релиза",
-            { showArtist: false },
-          )
-        : ""
-    }
+      ${
+        isArtist(state.me)
+          ? renderTrackGridSection(
+              "Релизы",
+              state.me.ownTracks,
+              "Ты ещё не загрузил ни одного релиза",
+            )
+          : ""
+      }
 
-    ${renderCompactTracksSection("Лайкнутые треки", state.me.likedTracks, "Ты пока не лайкнул ни одного трека", { showArtist: true })}
+      ${renderTrackGridSection("Лайкнутые треки", state.me.likedTracks, "Ты пока не лайкнул ни одного трека")}
+    </div>
   `;
 }
 
@@ -1584,22 +1871,7 @@ function renderInviterChip(inv) {
   `;
 }
 
-function renderAdminPanel() {
-  return `
-    <section class="panel admin-panel">
-      <div class="section-head">
-        <div>
-          <p class="eyebrow">Admin tools</p>
-          <h3>Еженедельный итог</h3>
-        </div>
-      </div>
-      <p class="muted">Публикация топ-3 треков, общих прослушиваний и выбора редакции в канал (CHANNEL_ID из .env). Автоматически пушится каждое воскресенье 18:00 UTC, можно вручную.</p>
-      <div class="cta-row">
-        <button class="btn" data-action="post-weekly-summary">Отправить итог недели сейчас</button>
-      </div>
-    </section>
-  `;
-}
+// Admin panel moved to admin.html
 
 function renderLikedView() {
   if (!state.me?.isRegistered) {
@@ -1669,6 +1941,8 @@ function renderTopbar() {
   switch (state.activeView) {
     case "home":    title = "Главная"; break;
     case "search":  title = "Поиск"; break;
+    case "battle":  title = "Баттлы"; break;
+    case "leaderboard": title = "Рейтинг"; break;
     case "upload":  title = "Загрузка"; break;
     case "liked":   title = "Избранное"; break;
     case "profile": title = "Личный кабинет"; break;
@@ -1725,6 +1999,15 @@ function render() {
     case "search":
       elements.app.innerHTML = renderSearchView();
       break;
+    case "news":
+      elements.app.innerHTML = renderNewsView();
+      break;
+    case "battle":
+      elements.app.innerHTML = renderArenaView();
+      break;
+    case "leaderboard":
+      elements.app.innerHTML = renderLeaderboardView();
+      break;
     case "upload":
       elements.app.innerHTML = renderUploadView();
       break;
@@ -1744,6 +2027,22 @@ function render() {
   }
 
   renderSupportDrawer();
+}
+
+async function loadAdminUsers() {
+  await withPending(async () => {
+    const data = await api("/api/admin/users");
+    state.adminUsers = data.users || [];
+    render();
+  });
+}
+
+async function loadAdminTracks() {
+  await withPending(async () => {
+    const data = await api("/api/admin/tracks");
+    state.adminTracks = data.tracks || [];
+    render();
+  });
 }
 
 async function refreshAfterMutation(message) {
@@ -1772,6 +2071,14 @@ document.addEventListener("click", async (event) => {
 
   if (navButton && navButton.classList.contains("nav-btn")) {
     state.activeView = navButton.dataset.view;
+    if (state.activeView === "battle") {
+      await loadBattles();
+    } else if (state.activeView === "leaderboard") {
+      await loadLeaderboard();
+    } else if (state.activeView === "admin") {
+      if (state.adminTab === "users") await loadAdminUsers();
+      else if (state.adminTab === "tracks") await loadAdminTracks();
+    }
     render();
     return;
   }
@@ -1803,9 +2110,100 @@ document.addEventListener("click", async (event) => {
 
   const action = actionTarget.dataset.action;
 
+  if (action === "battle-toggle-play") {
+    const trackId = Number(actionTarget.dataset.trackId);
+    const audio = document.querySelector(`audio.battle-audio[data-track-id="${trackId}"]`);
+    if (!audio) {
+      return;
+    }
+
+    document.querySelectorAll("audio.battle-audio").forEach((other) => {
+      if (other !== audio) {
+        other.pause();
+        const otherButton = document.querySelector(`button.battle-play-toggle[data-track-id="${other.dataset.trackId}"]`);
+        if (otherButton) {
+          otherButton.textContent = "▶";
+        }
+      }
+    });
+
+    if (audio.paused) {
+      audio.play().catch(() => {});
+      actionTarget.textContent = "⏸";
+    } else {
+      audio.pause();
+      actionTarget.textContent = "▶";
+    }
+    return;
+  }
+
+  if (action === "switch-arena-tab") {
+    state.arenaTab = actionTarget.dataset.tab;
+    render();
+    return;
+  }
+
   if (action === "jump-view") {
     state.activeView = actionTarget.dataset.view;
+    if (state.activeView === "admin") {
+      if (state.adminTab === "users") await loadAdminUsers();
+      else if (state.adminTab === "tracks") await loadAdminTracks();
+    }
     render();
+    return;
+  }
+
+  // --- ADMIN ACTIONS ---
+  if (action === "admin-switch-tab") {
+    state.adminTab = actionTarget.dataset.tab;
+    if (state.adminTab === "users") await loadAdminUsers();
+    else if (state.adminTab === "tracks") await loadAdminTracks();
+    render();
+    return;
+  }
+
+  if (action === "admin-toggle-ban") {
+    const userId = actionTarget.dataset.userId;
+    const currentlyBanned = actionTarget.dataset.banned === "true";
+    await withPending(async () => {
+      await api(`/api/admin/users/${userId}/ban`, {
+        method: "POST",
+        body: { isBanned: !currentlyBanned }
+      });
+      showToast(currentlyBanned ? "Пользователь разбанен." : "Пользователь забанен.");
+      await loadAdminUsers();
+    });
+    return;
+  }
+
+  if (action === "admin-delete-track") {
+    if (!confirm("Удалить этот трек навсегда?")) return;
+    const trackId = actionTarget.dataset.trackId;
+    await withPending(async () => {
+      await api(`/api/admin/tracks/${trackId}`, { method: "DELETE" });
+      showToast("Трек удален.");
+      await loadAdminTracks();
+    });
+    return;
+  }
+
+  if (action === "admin-delete-news") {
+    if (!confirm("Удалить эту новость?")) return;
+    const newsId = actionTarget.dataset.newsId;
+    await withPending(async () => {
+      await api(`/api/admin/news/${newsId}`, { method: "DELETE" });
+      showToast("Новость удалена.");
+      await loadBootstrap({ silent: true });
+    });
+    return;
+  }
+
+  if (action === "admin-trigger-battles") {
+    await withPending(async () => {
+      const res = await api("/api/admin/battles/trigger", { method: "POST" });
+      showToast(`Баттлы обновлены. Завершено: ${res.resolvedCount}, Создано: ${res.createdCount}`);
+      await loadBootstrap({ silent: true });
+    });
     return;
   }
 
@@ -1862,6 +2260,13 @@ document.addEventListener("click", async (event) => {
     const textarea = document.querySelector("#support-message-input");
     textarea?.focus();
     textarea?.setSelectionRange?.(textarea.value.length, textarea.value.length);
+    return;
+  }
+
+  if (action === "vote-battle") {
+    const battleId = actionTarget.dataset.battleId;
+    const trackId = actionTarget.dataset.trackId;
+    await voteInBattle(battleId, trackId);
     return;
   }
 
@@ -2054,6 +2459,40 @@ document.addEventListener("submit", async (event) => {
 
   event.preventDefault();
 
+  if (formType === "admin-add-news") {
+    await withPending(async () => {
+      const formData = new FormData(form);
+      const title = String(formData.get("title"));
+      const bodyText = String(formData.get("body"));
+      await api("/api/admin/news", {
+        method: "POST",
+        body: { title, body: bodyText }
+      });
+      showToast("Новость добавлена.");
+      form.reset();
+      await loadBootstrap({ silent: true });
+    });
+    return;
+  }
+
+  if (formType === "admin-create-battle") {
+    await withPending(async () => {
+      const formData = new FormData(form);
+      const genre = String(formData.get("genre"));
+      const trackAId = Number(formData.get("trackAId"));
+      const trackBId = Number(formData.get("trackBId"));
+      const hours = Number(formData.get("hours"));
+      await api("/api/admin/battles/create", {
+        method: "POST",
+        body: { genre, trackAId, trackBId, hours }
+      });
+      showToast("Баттл создан.");
+      form.reset();
+      await loadBootstrap({ silent: true });
+    });
+    return;
+  }
+
   if (formType === "register") {
     await withPending(async () => {
       const data = new FormData(form);
@@ -2213,6 +2652,29 @@ document.addEventListener("input", (event) => {
   ) {
     state.supportDraft = target.value.slice(0, 500);
   }
+
+  if (
+    target instanceof HTMLInputElement &&
+    target.dataset.action === "battle-seek"
+  ) {
+    const trackId = Number(target.dataset.trackId);
+    const audio = document.querySelector(`audio.battle-audio[data-track-id="${trackId}"]`);
+    if (!audio || !audio.duration) {
+      return;
+    }
+    audio.currentTime = (Number(target.value) / 100) * audio.duration;
+  }
+
+  if (
+    target instanceof HTMLInputElement &&
+    target.dataset.action === "battle-volume"
+  ) {
+    const volume = Number(target.value);
+    state.player.volume = Math.min(1, Math.max(0, volume));
+    document.querySelectorAll("audio.battle-audio").forEach((audio) => {
+      audio.volume = state.player.volume;
+    });
+  }
 });
 
 document.addEventListener(
@@ -2230,6 +2692,11 @@ document.addEventListener(
       return;
     }
 
+    document.querySelectorAll("button.battle-play-toggle").forEach((button) => {
+      const buttonTrackId = Number(button.dataset.trackId);
+      button.textContent = buttonTrackId === trackId ? "⏸" : "▶";
+    });
+
     const previousPlayAt = recentTrackPlays.get(trackId) || 0;
     const now = Date.now();
 
@@ -2243,8 +2710,46 @@ document.addEventListener(
   true,
 );
 
-loadBootstrap().catch((error) => {
-  state.loading = false;
-  render();
-  showToast(error.message, true);
-});
+function updateBattlePlayerProgress(audio) {
+  if (!(audio instanceof HTMLAudioElement)) {
+    return;
+  }
+
+  const trackId = audio.dataset.trackId;
+  const position = Number(audio.currentTime || 0);
+  const duration = Number(audio.duration || 0);
+
+  const seek = document.querySelector(`input.battle-seek[data-track-id="${trackId}"]`);
+  if (seek) {
+    seek.value = duration ? String(Math.round((position / duration) * 100)) : "0";
+  }
+  const currentTimeLabel = document.querySelector(
+    `span.battle-player-time[data-player-time="${trackId}"]`,
+  );
+  if (currentTimeLabel) {
+    currentTimeLabel.textContent = formatTime(position);
+  }
+  const durationLabel = document.querySelector(
+    `span.battle-player-duration[data-player-duration="${trackId}"]`,
+  );
+  if (durationLabel) {
+    durationLabel.textContent = formatTime(duration);
+  }
+}
+
+document.addEventListener(
+  "timeupdate",
+  (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLAudioElement)) {
+      return;
+    }
+    if (!target.classList.contains("battle-audio")) {
+      return;
+    }
+    updateBattlePlayerProgress(target);
+  },
+  true,
+);
+
+start();

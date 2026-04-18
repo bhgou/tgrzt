@@ -21,6 +21,8 @@ db.exec(`
     avatar_path TEXT,
     role TEXT NOT NULL DEFAULT 'guest' CHECK (role IN ('guest', 'listener', 'artist')),
     is_registered INTEGER NOT NULL DEFAULT 0,
+    critic_points INTEGER NOT NULL DEFAULT 0,
+    is_banned INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
   );
@@ -33,8 +35,30 @@ db.exec(`
     genre TEXT NOT NULL DEFAULT '',
     wav_path TEXT NOT NULL,
     mp3_path TEXT NOT NULL,
+    cover_path TEXT,
+    elo INTEGER NOT NULL DEFAULT 1200,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS battles (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    genre TEXT NOT NULL,
+    track_a_id INTEGER NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
+    track_b_id INTEGER NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
+    winner_id INTEGER REFERENCES tracks(id),
+    status TEXT NOT NULL DEFAULT 'active', -- 'active', 'finished'
+    type TEXT NOT NULL DEFAULT 'daily',    -- 'daily', 'monthly'
+    expires_at TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS battle_votes (
+    battle_id INTEGER NOT NULL REFERENCES battles(id) ON DELETE CASCADE,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    voted_track_id INTEGER NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (battle_id, user_id)
   );
 
   CREATE TABLE IF NOT EXISTS ratings (
@@ -113,6 +137,13 @@ db.exec(`
     posted_at TEXT NOT NULL
   );
 
+  CREATE TABLE IF NOT EXISTS news (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    body TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  );
+
   CREATE INDEX IF NOT EXISTS idx_tracks_owner_id ON tracks (owner_id);
   CREATE INDEX IF NOT EXISTS idx_tracks_created_at ON tracks (created_at DESC);
   CREATE INDEX IF NOT EXISTS idx_comments_track_id ON comments (track_id, created_at DESC);
@@ -139,6 +170,14 @@ const userColumns = db.prepare('PRAGMA table_info(users)').all();
 
 if (!userColumns.some((column) => column.name === 'role')) {
   db.exec(`ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'guest'`);
+}
+
+if (!userColumns.some((column) => column.name === 'critic_points')) {
+  db.exec(`ALTER TABLE users ADD COLUMN critic_points INTEGER NOT NULL DEFAULT 0`);
+}
+
+if (!userColumns.some((column) => column.name === 'is_banned')) {
+  db.exec(`ALTER TABLE users ADD COLUMN is_banned INTEGER NOT NULL DEFAULT 0`);
 }
 
 db.exec(`
@@ -184,7 +223,11 @@ function mapUserRecord(row) {
     playsCount: Number(row.plays_count ?? 0),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    criticPoints: Number(row.critic_points ?? 0),
+    totalElo: Number(row.total_elo ?? 0),
+    globalRank: Number(row.global_rank ?? 0),
     inviteCode: row.invite_code ?? null,
+    isBanned: Boolean(row.is_banned),
   };
 }
 
@@ -206,6 +249,8 @@ function mapArtistRecord(row) {
     followersCount: Number(row.followers_count ?? 0),
     playsCount: Number(row.plays_count ?? 0),
     monthlyPlaysCount: Number(row.monthly_plays_count ?? 0),
+    totalElo: Number(row.total_elo ?? 0),
+    globalRank: Number(row.global_rank ?? 0),
     isFollowing: Boolean(row.is_following),
     topTrackMp3Path: row.top_track_mp3_path ?? null,
   };
@@ -220,6 +265,8 @@ function mapTrackRow(row, viewerId) {
     genre: row.genre,
     wavPath: row.wav_path,
     mp3Path: row.mp3_path,
+    coverPath: row.cover_path,
+    elo: Number(row.elo ?? 1200),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     averageRating: Number(row.average_rating ?? 0),
@@ -266,8 +313,12 @@ function getUserSelect() {
       u.role,
       u.is_registered,
       u.invite_code,
+      u.critic_points,
+      u.is_banned,
       u.created_at,
       u.updated_at,
+      COALESCE((SELECT SUM(elo) FROM tracks t WHERE t.owner_id = u.id), 0) AS total_elo,
+      (SELECT COUNT(*) + 1 FROM (SELECT owner_id, SUM(elo) as se FROM tracks GROUP BY owner_id) sub WHERE sub.se > (SELECT SUM(elo) FROM tracks WHERE owner_id = u.id)) AS global_rank,
       COALESCE((SELECT COUNT(*) FROM tracks t WHERE t.owner_id = u.id), 0) AS tracks_count,
       COALESCE((SELECT COUNT(*) FROM follows f WHERE f.artist_id = u.id), 0) AS followers_count,
       COALESCE((SELECT COUNT(*) FROM follows f WHERE f.follower_id = u.id), 0) AS following_count,
@@ -477,6 +528,7 @@ function selectTracks(viewerId, options = {}) {
         t.genre,
         t.wav_path,
         t.mp3_path,
+        t.cover_path,
         t.created_at,
         t.updated_at,
         u.nickname AS owner_nickname,
@@ -639,6 +691,8 @@ export function getArtistProfile(artistId, viewerId) {
       u.bio,
       u.avatar_path,
       u.role,
+      COALESCE((SELECT SUM(elo) FROM tracks t WHERE t.owner_id = u.id), 0) AS total_elo,
+      (SELECT COUNT(*) + 1 FROM (SELECT owner_id, SUM(elo) as se FROM tracks GROUP BY owner_id) sub WHERE sub.se > (SELECT SUM(elo) FROM tracks WHERE owner_id = u.id)) AS global_rank,
       COALESCE((SELECT COUNT(*) FROM tracks t WHERE t.owner_id = u.id), 0) AS tracks_count,
       COALESCE((SELECT COUNT(*) FROM follows f WHERE f.artist_id = u.id), 0) AS followers_count,
       COALESCE((
@@ -784,6 +838,7 @@ export function getBootstrapData(userId) {
     }),
     topArtists: getTopArtists(userId, 18),
     platformStats: getPlatformStats(),
+    news: getAllNews(),
   };
 }
 
@@ -926,6 +981,10 @@ export function createTrack(userId, input) {
   const description = trimText(input.description, 500);
   const genre = trimText(input.genre, 40);
 
+  if (!config.genres.includes(genre)) {
+    throw httpError(400, 'Укажи корректный жанр из списка.');
+  }
+
   const inserted = db.prepare(`
     INSERT INTO tracks (
       owner_id,
@@ -934,6 +993,7 @@ export function createTrack(userId, input) {
       genre,
       wav_path,
       mp3_path,
+      cover_path,
       created_at,
       updated_at
     )
@@ -944,6 +1004,7 @@ export function createTrack(userId, input) {
       :genre,
       :wavPath,
       :mp3Path,
+      :coverPath,
       :createdAt,
       :updatedAt
     )
@@ -954,6 +1015,7 @@ export function createTrack(userId, input) {
     genre,
     wavPath: input.wavPath,
     mp3Path: input.mp3Path,
+    coverPath: input.coverPath || null,
     createdAt: nowIso(),
     updatedAt: nowIso(),
   });
@@ -1382,20 +1444,181 @@ export function getWeeklySummary() {
     totalPlays: Number(totalPlaysRow?.total ?? 0),
     editorsPick: randomTrack
       ? {
-          id: Number(randomTrack.id),
-          title: randomTrack.title,
-          artistName: buildDisplayName({
-            nickname: randomTrack.nickname,
-            firstName: randomTrack.first_name,
-            lastName: randomTrack.last_name,
-            username: randomTrack.username,
-          }),
-        }
+        id: Number(randomTrack.id),
+        title: randomTrack.title,
+        artistName: buildDisplayName({
+          nickname: randomTrack.nickname,
+          firstName: randomTrack.first_name,
+          lastName: randomTrack.last_name,
+          username: randomTrack.username,
+        }),
+      }
       : null,
   };
 }
 
-// ====== TOP INVITERS (для бегущей ленты слева) ======
+// ========================== BATTLES & ELO ==========================
+
+function calculateElo(ratingA, ratingB, actualScoreA, kFactor = 32) {
+  const expectedScoreA = 1 / (1 + Math.pow(10, (ratingB - ratingA) / 400));
+  const newRatingA = Math.round(ratingA + kFactor * (actualScoreA - expectedScoreA));
+  return newRatingA;
+}
+
+export function getActiveBattles(userId) {
+  const rows = db.prepare(`
+    SELECT
+      b.id, b.genre, b.status, b.type, b.expires_at,
+      ta.id AS track_a_id, ta.title AS track_a_title, ta.cover_path AS track_a_cover, ta.mp3_path AS track_a_mp3, ta.elo AS track_a_elo,
+      tb.id AS track_b_id, tb.title AS track_b_title, tb.cover_path AS track_b_cover, tb.mp3_path AS track_b_mp3, tb.elo AS track_b_elo,
+      ua.nickname AS artist_a_nickname, ub.nickname AS artist_b_nickname,
+      EXISTS(SELECT 1 FROM battle_votes bv WHERE bv.battle_id = b.id AND bv.user_id = :userId) AS has_voted
+    FROM battles b
+    JOIN tracks ta ON ta.id = b.track_a_id
+    JOIN tracks tb ON tb.id = b.track_b_id
+    JOIN users ua ON ua.id = ta.owner_id
+    JOIN users ub ON ub.id = tb.owner_id
+    WHERE b.status = 'active' AND b.expires_at > :now
+  `).all({ userId: Number(userId), now: nowIso() });
+
+  return rows.map(row => ({
+    id: row.id,
+    genre: row.genre,
+    type: row.type,
+    expiresAt: row.expires_at,
+    hasVoted: Boolean(row.has_voted),
+    trackA: {
+      id: row.track_a_id,
+      title: row.track_a_title,
+      coverPath: row.track_a_cover,
+      mp3Path: row.track_a_mp3,
+      elo: row.track_a_elo,
+      artistNickname: row.artist_a_nickname
+    },
+    trackB: {
+      id: row.track_b_id,
+      title: row.track_b_title,
+      coverPath: row.track_b_cover,
+      mp3Path: row.track_b_mp3,
+      elo: row.track_b_elo,
+      artistNickname: row.artist_b_nickname
+    }
+  }));
+}
+
+export function voteInBattle(userId, battleId, votedTrackId) {
+  const battle = db.prepare('SELECT * FROM battles WHERE id = :id').get({ id: Number(battleId) });
+  if (!battle || battle.status !== 'active') throw httpError(404, 'Баттл не найден или уже завершен.');
+
+  const now = nowIso();
+  if (battle.expires_at < now) throw httpError(400, 'Баттл уже истек.');
+
+  const alreadyVoted = db.prepare('SELECT 1 FROM battle_votes WHERE battle_id = :bid AND user_id = :uid')
+    .get({ bid: battle.id, uid: Number(userId) });
+  if (alreadyVoted) throw httpError(400, 'Вы уже проголосовали в этом баттле.');
+
+  const trackA = getTrackRecord(battle.track_a_id);
+  const trackB = getTrackRecord(battle.track_b_id);
+
+  if (Number(votedTrackId) !== trackA.id && Number(votedTrackId) !== trackB.id) {
+    throw httpError(400, 'Неверный ID трека для голосования.');
+  }
+
+  // Record vote
+  db.prepare(`
+    INSERT INTO battle_votes (battle_id, user_id, voted_track_id, created_at)
+    VALUES (:bid, :uid, :tid, :now)
+  `).run({ bid: battle.id, uid: Number(userId), tid: Number(votedTrackId), now });
+
+  return { ok: true };
+}
+
+export function getLeaderboard(limit = 20) {
+  return selectTracks(0, {
+    orderBy: 't.elo DESC, plays_count DESC',
+    limit: Number(limit)
+  });
+}
+
+export function createDailyBattles() {
+  const genres = config.genres;
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString();
+  const created = [];
+
+  for (const genre of genres) {
+    // Находим 2 случайных трека этого жанра, которые еще не в активном баттле
+    const candidates = db.prepare(`
+      SELECT id FROM tracks
+      WHERE genre = :genre
+      AND id NOT IN (SELECT track_a_id FROM battles WHERE status = 'active')
+      AND id NOT IN (SELECT track_b_id FROM battles WHERE status = 'active')
+      ORDER BY RANDOM()
+      LIMIT 2
+    `).all({ genre });
+
+    if (candidates.length === 2) {
+      const bid = db.prepare(`
+        INSERT INTO battles (genre, track_a_id, track_b_id, expires_at, created_at)
+        VALUES (:genre, :a, :b, :expires, :now)
+      `).run({
+        genre,
+        a: candidates[0].id,
+        b: candidates[1].id,
+        expires: expiresAt,
+        now: nowIso()
+      }).lastInsertRowid;
+      created.push(bid);
+    }
+  }
+  return created;
+}
+
+export function resolveDailyBattles() {
+  const activeBattles = db.prepare(`SELECT id, track_a_id, track_b_id FROM battles WHERE status = 'active'`).all();
+  let resolvedCount = 0;
+
+  for (const battle of activeBattles) {
+    const votes = db.prepare(`
+      SELECT voted_track_id, COUNT(*) as cnt
+      FROM battle_votes
+      WHERE battle_id = ?
+      GROUP BY voted_track_id
+      ORDER BY cnt DESC
+    `).all(battle.id);
+
+    const winnerId = votes.length > 0 ? votes[0].voted_track_id : null;
+
+    db.prepare(`UPDATE battles SET status = 'finished', winner_id = ? WHERE id = ?`).run(winnerId, battle.id);
+
+    if (winnerId) {
+      // Award Critic Points to those who voted for the winner
+      db.prepare(`
+        UPDATE users
+        SET critic_points = critic_points + 10
+        WHERE id IN (
+          SELECT user_id FROM battle_votes WHERE battle_id = ? AND voted_track_id = ?
+        )
+      `).run(battle.id, winnerId);
+
+      // Award Elo to the winning track and update the loser's Elo
+      const trackA = db.prepare(`SELECT id, elo FROM tracks WHERE id = ?`).get(battle.track_a_id);
+      const trackB = db.prepare(`SELECT id, elo FROM tracks WHERE id = ?`).get(battle.track_b_id);
+
+      if (trackA && trackB) {
+        const isAWinner = Number(winnerId) === trackA.id;
+        const newEloA = calculateElo(trackA.elo, trackB.elo, isAWinner ? 1 : 0);
+        const newEloB = calculateElo(trackB.elo, trackA.elo, isAWinner ? 0 : 1);
+
+        db.prepare(`UPDATE tracks SET elo = ? WHERE id = ?`).run(newEloA, trackA.id);
+        db.prepare(`UPDATE tracks SET elo = ? WHERE id = ?`).run(newEloB, trackB.id);
+      }
+    }
+    resolvedCount += 1;
+  }
+
+  return resolvedCount;
+}
 export function getTopInviters(limit = 20) {
   const rows = db
     .prepare(
@@ -1433,4 +1656,81 @@ export function getTopInviters(limit = 20) {
       username: row.username,
     }),
   }));
+}
+
+export function getHallOfFame() {
+  const recentWinners = db.prepare(`
+    SELECT b.id as battle_id, b.genre, b.winner_id, t.title, t.cover_path, t.mp3_path, u.nickname as artist_nickname
+    FROM battles b
+    JOIN tracks t ON b.winner_id = t.id
+    JOIN users u ON t.owner_id = u.id
+    WHERE b.status = 'finished' AND b.winner_id IS NOT NULL
+    ORDER BY b.expires_at DESC
+    LIMIT 10
+  `).all();
+
+  return {
+    recentWinners: recentWinners.map(row => ({
+      battleId: row.battle_id,
+      genre: row.genre,
+      trackId: row.winner_id,
+      title: row.title,
+      coverPath: row.cover_path,
+      mp3Path: row.mp3_path,
+      artistNickname: row.artist_nickname
+    }))
+  };
+}
+export function getAllUsers(limit = 100) {
+  const rows = db.prepare(`${getUserSelect()} ORDER BY u.created_at DESC LIMIT ?`).all(Number(limit));
+  return rows.map(mapUserRecord);
+}
+
+export function setUserBan(userId, isBanned) {
+  db.prepare(`UPDATE users SET is_banned = ? WHERE id = ?`).run(isBanned ? 1 : 0, Number(userId));
+  return getUserById(userId);
+}
+
+export function getAllTracks(limit = 100) {
+  return selectTracks(0, { limit, orderBy: 't.created_at DESC' });
+}
+
+export function adminDeleteTrack(trackId) {
+  const track = db.prepare('SELECT id, wav_path, mp3_path FROM tracks WHERE id = ?').get(Number(trackId));
+  if (!track) throw httpError(404, 'Трек не найден.');
+
+  db.prepare('DELETE FROM tracks WHERE id = ?').run(track.id);
+  return track;
+}
+
+export function addNews(title, body) {
+  const timestamp = nowIso();
+  const id = db.prepare(`
+    INSERT INTO news (title, body, created_at)
+    VALUES (?, ?, ?)
+  `).run(title, body, timestamp).lastInsertRowid;
+  return { id, title, body, createdAt: timestamp };
+}
+
+export function getAllNews() {
+  return db.prepare(`SELECT * FROM news ORDER BY created_at DESC`).all().map(row => ({
+    id: row.id,
+    title: row.title,
+    body: row.body,
+    createdAt: row.created_at
+  }));
+}
+
+export function deleteNews(newsId) {
+  db.prepare(`DELETE FROM news WHERE id = ?`).run(Number(newsId));
+  return { ok: true };
+}
+
+export function adminCreateBattle(genre, trackAId, trackBId, hours = 24) {
+  const expiresAt = new Date(Date.now() + hours * 60 * 60 * 1000).toISOString();
+  const id = db.prepare(`
+    INSERT INTO battles (genre, track_a_id, track_b_id, expires_at, created_at)
+    VALUES (?, ?, ?, ?, ?)
+  `).run(genre, Number(trackAId), Number(trackBId), expiresAt, nowIso()).lastInsertRowid;
+  return { id, genre, trackAId, trackBId, expiresAt };
 }

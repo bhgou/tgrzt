@@ -3,6 +3,10 @@ import { config } from './config.js';
 import { httpError } from './utils.js';
 
 function getInitDataFromRequest(req) {
+  const authHeader = req.headers['authorization'] || req.headers['Authorization'];
+  if (authHeader && authHeader.startsWith('TelegramMiniApp ')) {
+    return authHeader.slice('TelegramMiniApp '.length);
+  }
   return req.headers['x-telegram-init-data'] || '';
 }
 
@@ -22,19 +26,22 @@ function verifyTelegramInitData(initData) {
   const hash = params.get('hash');
 
   if (!hash) {
+    console.error('[auth] hash missing in initData');
     throw httpError(401, 'Telegram initData не содержит hash.');
   }
 
   params.delete('hash');
-  const dataCheckString = [...params.entries()]
-    .sort(([left], [right]) => left.localeCompare(right))
-    .map(([key, value]) => `${key}=${value}`)
-    .join('\n');
+  const pairs = [...params.entries()].sort(([a], [b]) => a.localeCompare(b));
+  const dataCheckString = pairs.map(([key, value]) => `${key}=${value}`).join('\n');
 
   const secretKey = crypto.createHmac('sha256', 'WebAppData').update(config.botToken).digest();
   const calculatedHash = crypto.createHmac('sha256', secretKey).update(dataCheckString).digest('hex');
 
   if (!safeCompare(hash, calculatedHash)) {
+    console.error('[auth] hash mismatch!');
+    console.error('  Received:', hash);
+    console.error('  Calculated:', calculatedHash);
+    console.error('  DataCheckString:', dataCheckString.replace(/\n/g, '\\n'));
     throw httpError(401, 'Подпись Telegram Mini App не прошла проверку.');
   }
 
@@ -67,6 +74,7 @@ export function authenticateRequest(req) {
   const initData = getInitDataFromRequest(req);
 
   if (initData) {
+    console.log('[auth] Received initData, length:', initData.length);
     if (!config.botToken) {
       throw httpError(500, 'Для Telegram Mini App нужен BOT_TOKEN.');
     }
@@ -74,6 +82,7 @@ export function authenticateRequest(req) {
     return verifyTelegramInitData(initData);
   }
 
+  console.warn('[auth] No X-Telegram-Init-Data header found in request');
   if (config.allowDevAuth) {
     return {
       ...config.devUser,
