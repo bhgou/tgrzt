@@ -10,6 +10,10 @@ function getInitDataFromRequest(req) {
   return req.headers['x-telegram-init-data'] || '';
 }
 
+function getAdminSecretFromRequest(req) {
+  return req.headers['x-admin-token'] || req.headers['X-Admin-Token'] || '';
+}
+
 function safeCompare(left, right) {
   const leftBuffer = Buffer.from(left, 'hex');
   const rightBuffer = Buffer.from(right, 'hex');
@@ -19,6 +23,22 @@ function safeCompare(left, right) {
   }
 
   return crypto.timingSafeEqual(leftBuffer, rightBuffer);
+}
+
+function verifyAdminSecret(token) {
+  if (!token) return null;
+  if (config.adminSecretToken && token !== config.adminSecretToken) {
+    throw httpError(403, 'Неверный токен администратора.');
+  }
+  return {
+    telegramId: config.devUser.telegramId,
+    username: config.devUser.username,
+    firstName: config.devUser.firstName,
+    lastName: config.devUser.lastName,
+    photoUrl: '',
+    source: 'admin',
+    isAdmin: true,
+  };
 }
 
 function verifyTelegramInitData(initData) {
@@ -71,6 +91,11 @@ function verifyTelegramInitData(initData) {
 }
 
 export function authenticateRequest(req) {
+  const adminToken = getAdminSecretFromRequest(req);
+  if (adminToken) {
+    return verifyAdminSecret(adminToken);
+  }
+
   const initData = getInitDataFromRequest(req);
 
   if (initData) {

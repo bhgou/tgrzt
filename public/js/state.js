@@ -11,12 +11,11 @@ export const state = {
   hallOfFame: { recentWinners: [] },
   genres: [],
   news: [],
+  banners: [],
   history: ['home'],
   platformStats: {},
-  supportMessages: [],
-  supportChatOpen: false,
-  supportLoading: false,
-  supportDraft: '',
+  botUsername: '',
+  supportTelegramId: '',
   
   // Player state
   player: {

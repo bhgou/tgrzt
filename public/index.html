@@ -9,6 +9,13 @@
     <link rel="stylesheet" href="/styles.css?v=dock-v5" />
   </head>
   <body>
+    <div class="search-overlay" id="search-overlay">
+      <div class="search-overlay-header">
+        <input type="search" class="search-overlay-input" id="search-overlay-input" placeholder="Поиск артистов, треков..." />
+        <button class="search-close-btn" id="search-close-btn">Закрыть</button>
+      </div>
+      <div class="search-results-panel" id="search-results-panel"></div>
+    </div>
     <div class="ambient ambient-a"></div>
     <div class="ambient ambient-b"></div>
     <div class="music-wave music-wave-left" aria-hidden="true"></div>
@@ -31,9 +38,13 @@
               <circle cx="17" cy="42" r="7" />
             </svg>
           </div>
-          <div class="brand-copy">
-            <h1>Demo Stage</h1>
-          </div>
+        </div>
+        <div class="topbar-search" id="topbar-search">
+          <input
+            id="search-input"
+            type="search"
+            placeholder="Поиск..."
+          />
         </div>
         <div id="topbar-title" class="topbar-title"></div>
         <div class="topbar-actions">
@@ -41,8 +52,8 @@
             id="support-toggle"
             class="topbar-support-btn"
             type="button"
-            data-action="support-toggle"
-            aria-label="Открыть чат поддержки"
+            data-action="open-support"
+            aria-label="Написать в поддержку"
           >
             <span class="nav-icon nav-support" aria-hidden="true"></span>
           </button>
@@ -55,7 +66,6 @@
       <nav class="bottom-nav has-upload-fab">
         <button class="nav-btn is-active" data-view="home">
           <span class="nav-icon nav-home" aria-hidden="true"></span>
-          <span>Главная</span>
         </button>
         <button class="nav-btn" data-view="battle">
           <span class="nav-icon nav-arena" aria-hidden="true"></span>
@@ -84,8 +94,6 @@
       </nav>
     </div>
 
-    <div id="support-backdrop" class="support-backdrop"></div>
-    <aside id="support-drawer" class="support-drawer"></aside>
     <div id="track-modal-backdrop" class="track-modal-backdrop"></div>
     <aside id="track-modal" class="track-modal" aria-hidden="true"></aside>
     <div id="toast" class="toast"></div>

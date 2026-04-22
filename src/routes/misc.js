@@ -7,7 +7,8 @@ import {
   getTopInviters,
   getActiveBattles,
   getHallOfFame,
-  getAllNews
+  getAllNews,
+  getActiveBanners
 } from '../database.js';
 import { sendJson, readJson } from '../http.js';
 import { toPublicMediaUrl } from '../storage.js';
@@ -43,12 +44,14 @@ export async function handleMiscRequest(req, res, pathname, sessionUser, telegra
       topArtists: data.topArtists.map(mapArtistForClient),
       platformStats: data.platformStats,
       news: getAllNews(),
+      banners: getActiveBanners(),
       inviteCode: inviteStats.code,
       topInviters,
       genres: config.genres,
       activeBattles: battles,
       hallOfFame: hallOfFameData,
       botUsername: telegramBot.botInfo?.username || '',
+      supportTelegramId: config.supportTelegramId || '',
       capabilities: {
         ffmpegReady,
         botConfigured: Boolean(config.botToken),

@@ -42,8 +42,6 @@ async function start() {
 
 const elements = {
   app: document.querySelector("#app"),
-  supportBackdrop: document.querySelector("#support-backdrop"),
-  supportDrawer: document.querySelector("#support-drawer"),
   supportToggle: document.querySelector("#support-toggle"),
   toast: document.querySelector("#toast"),
   topbarMeta: document.querySelector("#topbar-meta"),
@@ -292,36 +290,12 @@ async function openArtistProfile(artistId, options = {}) {
   }
 }
 
-async function loadSupportMessages(options = {}) {
-  if (!options.silent) {
-    state.supportLoading = true;
-    render();
+function openSupportTelegram() {
+  let supportId = state.supportTelegramId || state.botUsername;
+  if (supportId) {
+    supportId = supportId.replace('@', '');
+    window.open(`https://t.me/${supportId}`, '_blank');
   }
-
-  try {
-    const response = await api("/api/support/messages");
-    state.supportMessages = response.messages || [];
-    state.supportLoaded = true;
-  } catch (error) {
-    showToast(error.message, true);
-  } finally {
-    state.supportLoading = false;
-    render();
-  }
-}
-
-async function openSupportChat() {
-  state.supportChatOpen = true;
-  render();
-
-  if (!state.supportLoaded) {
-    await loadSupportMessages();
-  }
-}
-
-function closeSupportChat() {
-  state.supportChatOpen = false;
-  render();
 }
 
 function renderAvatar(entity, className = "avatar") {
@@ -529,87 +503,7 @@ function renderTrackCard(track) {
   `;
 }
 
-function renderSupportBubble(message) {
-  const author = message.senderType === "user" ? "Вы" : "Поддержка";
 
-  return `
-    <div class="support-bubble ${message.senderType}">
-      <strong>${escapeHtml(author)}</strong>
-      <p>${escapeHtml(message.body)}</p>
-      <small class="muted">${escapeHtml(formatDateTime(message.createdAt))}</small>
-    </div>
-  `;
-}
-
-function renderSupportDrawer() {
-  if (!elements.supportDrawer || !elements.supportBackdrop) {
-    return;
-  }
-
-  const supportMessages = state.supportMessages.length
-    ? state.supportMessages
-    : [
-        {
-          id: "welcome",
-          senderType: "support",
-          body: "Поддержка на связи. Напиши сюда вопрос по ролям, загрузке WAV, Mini App, подпискам или модерации.",
-          createdAt: "",
-        },
-      ];
-
-  if (elements.supportToggle) {
-    elements.supportToggle.setAttribute(
-      "aria-label",
-      state.supportChatOpen ? "Закрыть чат поддержки" : "Открыть чат поддержки",
-    );
-    elements.supportToggle.classList.toggle("is-open", state.supportChatOpen);
-    elements.supportToggle.disabled = state.pending || state.supportLoading;
-  }
-  elements.supportBackdrop.classList.toggle(
-    "is-visible",
-    state.supportChatOpen,
-  );
-  elements.supportDrawer.classList.toggle("is-open", state.supportChatOpen);
-  elements.supportDrawer.setAttribute(
-    "aria-hidden",
-    state.supportChatOpen ? "false" : "true",
-  );
-  elements.supportDrawer.innerHTML = `
-    <div class="support-head">
-      <div>
-        <p class="eyebrow">Support chat</p>
-        <h3>Чат поддержки</h3>
-      </div>
-      <button class="support-close" type="button" data-action="support-close">✕</button>
-    </div>
-
-    <div class="support-note">
-      <strong>Если что-то не работает, напиши сюда.</strong>
-      <p class="muted">Поддержка помогает с ролями, загрузкой, Mini App, подписками и жалобами на контент.</p>
-    </div>
-
-    <div class="support-feed">
-      <div class="support-quick-list">
-        <button class="support-chip" type="button" data-action="support-prompt" data-message="Не открывается Mini App">Mini App</button>
-        <button class="support-chip" type="button" data-action="support-prompt" data-message="Не могу загрузить WAV">Загрузка WAV</button>
-        <button class="support-chip" type="button" data-action="support-prompt" data-message="Как переключиться на артиста?">Смена роли</button>
-      </div>
-      ${
-        state.supportLoading
-          ? '<div class="empty-state"><strong>Загружаю чат поддержки</strong><span class="muted">Пара секунд.</span></div>'
-          : supportMessages.map(renderSupportBubble).join("")
-      }
-    </div>
-
-    <form class="support-form" data-form="support">
-      <div class="field">
-        <label for="support-message-input">Сообщение в поддержку</label>
-        <textarea id="support-message-input" name="body" maxlength="500" placeholder="Например: у меня не открывается Mini App или не загружается WAV.">${escapeHtml(state.supportDraft)}</textarea>
-      </div>
-      <button class="btn" ${state.supportLoading ? "disabled" : ""}>Отправить в поддержку</button>
-    </form>
-  `;
-}
 
 // =================== TRACK MODAL ===================
 function findTrackInState(trackId) {
@@ -992,8 +886,8 @@ function renderTopArtistsSection(artists) {
     <section class="panel top-artists-panel">
       <div class="section-head">
         <div>
-          <p class="eyebrow">Top artists by month</p>
-          <h3>Топ артистов месяца</h3>
+          <p class="eyebrow">Monthly top</p>
+          <h3>Топ артистов</h3>
         </div>
       </div>
       ${
@@ -1321,9 +1215,49 @@ function renderArenaView() {
   `;
 }
 
+function renderBannersSection() {
+  if (!state.banners?.length) return '';
+  
+  if (state.banners.length === 1) {
+    const b = state.banners[0];
+    return `
+      <section class="banners-section">
+        <a href="${b.link ? escapeHtml(b.link) : '#'}" target="_blank" class="home-banner ${b.link ? 'is-clickable' : ''}" style="background: ${b.image_url ? `url(${escapeHtml(b.image_url)}) center/cover no-repeat, ${escapeHtml(b.bg_color)}` : escapeHtml(b.bg_color)}; color: ${escapeHtml(b.text_color)};">
+          <div class="banner-content">
+            <h3>${escapeHtml(b.title)}</h3>
+            <p>${escapeHtml(b.body)}</p>
+          </div>
+        </a>
+      </section>
+    `;
+  }
+  
+  return `
+    <section class="banners-section">
+      <div class="banner-carousel" id="banner-carousel">
+        ${state.banners.map((b, i) => `
+          <a href="${b.link ? escapeHtml(b.link) : '#'}" target="_blank" class="banner-slide ${i === 0 ? 'active' : ''}" data-slide="${i}">
+            <div class="home-banner" style="background: ${b.image_url ? `url(${escapeHtml(b.image_url)}) center/cover no-repeat, ${escapeHtml(b.bg_color)}` : escapeHtml(b.bg_color)}; color: ${escapeHtml(b.text_color)};">
+              <div class="banner-content">
+                <h3>${escapeHtml(b.title)}</h3>
+                <p>${escapeHtml(b.body)}</p>
+              </div>
+            </div>
+          </a>
+        `).join('')}
+        <div class="banner-dots">
+          ${state.banners.map((_, i) => `
+            <button class="banner-dot ${i === 0 ? 'active' : ''}" data-dot="${i}"></button>
+          `).join('')}
+        </div>
+      </div>
+    </section>
+  `;
+}
+
 function renderHomeView() {
-  const topArtists = state.topArtists.slice(0, 5);
-  const popularArtists = state.topArtists.slice(5);
+  const topArtists = state.topArtists.slice(0, 2);
+  const popularArtists = state.topArtists.slice(2);
   
   // Find top ELO track for the winner block
   const topEloTrack = state.leaderboard?.[0];
@@ -1418,20 +1352,6 @@ function renderHomeView() {
       )
     : "";
 
-  const searchSection = `
-    <section class="panel search-minimal">
-      <div class="field">
-        <input
-          id="search-input"
-          name="search"
-          type="search"
-          placeholder="Поиск артиста или трека"
-          value="${escapeHtml(state.searchQuery)}"
-        />
-      </div>
-    </section>
-  `;
-
   const searchResultsSection = state.searchQuery.trim()
     ? state.searchResults.artists.length
       ? `
@@ -1448,12 +1368,11 @@ function renderHomeView() {
 
   return `
     <div class="view-content stack">
-      ${searchSection}
       ${searchResultsSection}
+      ${renderBannersSection()}
       ${activeBattleSection}
       ${winnerSection}
       ${hallOfFameSection}
-      ${renderNewsSection()}
       ${renderTopArtistsSection(topArtists)}
       ${latestSection}
     </div>
@@ -1472,11 +1391,13 @@ function renderNewsSection() {
         <button class="btn-ghost" data-action="jump-view" data-view="news">Все новости</button>
       </div>
       <div class="news-list" style="margin-top: 12px;">
-        ${state.news.slice(0, 2).map(n => `
-          <div class="news-card">
-            <h4>${escapeHtml(n.title)}</h4>
-            <div class="news-meta">${formatDate(n.createdAt)}</div>
-            <div class="news-body">${escapeHtml(n.body.length > 100 ? n.body.slice(0, 100) + '...' : n.body)}</div>
+        ${state.news.slice(0, 2).map((n, i) => `
+          <div class="news-card is-expandable" data-action="toggle-news" data-news-index="${i}">
+            <div class="news-card-header">
+              <h4 class="news-card-title">${escapeHtml(n.title)}</h4>
+              <span class="news-card-date">${formatDate(n.createdAt)}</span>
+            </div>
+            <p class="news-card-body">${escapeHtml(n.body)}</p>
           </div>
         `).join('')}
       </div>
@@ -1494,11 +1415,13 @@ function renderNewsView() {
         </div>
       </div>
       <div class="news-list">
-        ${(state.news || []).map(n => `
-          <div class="news-card">
-            <h4>${escapeHtml(n.title)}</h4>
-            <div class="news-meta">${formatDateTime(n.createdAt)}</div>
-            <div class="news-body">${escapeHtml(n.body)}</div>
+        ${(state.news || []).map((n, i) => `
+          <div class="news-card is-expandable" data-action="toggle-news" data-news-index="${i}">
+            <div class="news-card-header">
+              <h4 class="news-card-title">${escapeHtml(n.title)}</h4>
+              <span class="news-card-date">${formatDateTime(n.createdAt)}</span>
+            </div>
+            <p class="news-card-body">${escapeHtml(n.body)}</p>
           </div>
         `).join('')}
       </div>
@@ -1939,7 +1862,6 @@ function renderTopbar() {
 
   let title = "";
   switch (state.activeView) {
-    case "home":    title = "Главная"; break;
     case "search":  title = "Поиск"; break;
     case "battle":  title = "Баттлы"; break;
     case "leaderboard": title = "Рейтинг"; break;
@@ -1961,20 +1883,21 @@ function renderTopbar() {
 function render() {
   renderTopbar();
   renderNavAvatar();
+  
+  const searchWrapper = document.getElementById('topbar-search');
+  if (searchWrapper) {
+    searchWrapper.style.display = state.activeView === 'home' ? '' : 'none';
+  }
 
   if (isListener(state.me) && state.activeView === "upload") {
     state.activeView = "profile";
   }
 
   elements.navButtons.forEach((button) => {
-    const isSupportButton = button.dataset.action === "support-toggle";
-
     button.hidden = button.dataset.view === "upload" && isListener(state.me);
     button.classList.toggle(
       "is-active",
-      isSupportButton
-        ? state.supportChatOpen
-        : button.dataset.view === state.activeView,
+      button.dataset.view === state.activeView,
     );
     button.disabled = state.pending;
   });
@@ -1990,7 +1913,6 @@ function render() {
   }
 
   if (state.loading) {
-    renderSupportDrawer();
     elements.app.innerHTML = renderLoadingView();
     return;
   }
@@ -2023,10 +1945,66 @@ function render() {
     case "home":
     default:
       elements.app.innerHTML = renderHomeView();
+      initBannerCarousel();
       break;
   }
+}
 
-  renderSupportDrawer();
+let bannerCarouselInterval = null;
+let currentBannerSlide = 0;
+
+function initBannerCarousel() {
+  const carousel = document.getElementById('banner-carousel');
+  if (!carousel || state.banners.length <= 1) return;
+  
+  clearInterval(bannerCarouselInterval);
+  currentBannerSlide = 0;
+  
+  carousel.querySelectorAll('.banner-dot').forEach((dot, i) => {
+    if (i === 0) {
+      dot.classList.add('active');
+      void dot.offsetWidth;
+      dot.classList.add('animate');
+    } else {
+      dot.classList.remove('active', 'animate');
+    }
+  });
+  
+  bannerCarouselInterval = setInterval(() => {
+    currentBannerSlide = (currentBannerSlide + 1) % state.banners.length;
+    goToBannerSlide(currentBannerSlide);
+  }, 5000);
+  
+  carousel.querySelectorAll('.banner-dot').forEach(dot => {
+    dot.addEventListener('click', () => {
+      const slideIndex = parseInt(dot.dataset.dot);
+      currentBannerSlide = slideIndex;
+      goToBannerSlide(slideIndex);
+      clearInterval(bannerCarouselInterval);
+      bannerCarouselInterval = setInterval(() => {
+        currentBannerSlide = (currentBannerSlide + 1) % state.banners.length;
+        goToBannerSlide(currentBannerSlide);
+      }, 5000);
+    });
+  });
+}
+
+function goToBannerSlide(index) {
+  const carousel = document.getElementById('banner-carousel');
+  if (!carousel) return;
+  
+  carousel.querySelectorAll('.banner-slide').forEach((slide, i) => {
+    slide.classList.toggle('active', i === index);
+  });
+  carousel.querySelectorAll('.banner-dot').forEach((dot, i) => {
+    if (i === index) {
+      dot.classList.add('active');
+      void dot.offsetWidth;
+      dot.classList.add('animate');
+    } else {
+      dot.classList.remove('active', 'animate');
+    }
+  });
 }
 
 async function loadAdminUsers() {
@@ -2083,20 +2061,6 @@ document.addEventListener("click", async (event) => {
     return;
   }
 
-  if (event.target.closest("#support-toggle")) {
-    if (state.supportChatOpen) {
-      closeSupportChat();
-    } else {
-      await openSupportChat();
-    }
-    return;
-  }
-
-  if (event.target.closest("#support-backdrop")) {
-    closeSupportChat();
-    return;
-  }
-
   if (event.target.closest("#track-modal-backdrop")) {
     closeTrackModal();
     return;
@@ -2150,6 +2114,14 @@ document.addEventListener("click", async (event) => {
       else if (state.adminTab === "tracks") await loadAdminTracks();
     }
     render();
+    return;
+  }
+
+  if (action === "toggle-news") {
+    const card = actionTarget.closest('.news-card');
+    if (card) {
+      card.classList.toggle('is-expanded');
+    }
     return;
   }
 
@@ -2240,26 +2212,8 @@ document.addEventListener("click", async (event) => {
     return;
   }
 
-  if (action === "support-close") {
-    closeSupportChat();
-    return;
-  }
-
-  if (action === "support-toggle") {
-    if (state.supportChatOpen) {
-      closeSupportChat();
-    } else {
-      await openSupportChat();
-    }
-    return;
-  }
-
-  if (action === "support-prompt") {
-    state.supportDraft = actionTarget.dataset.message || "";
-    renderSupportDrawer();
-    const textarea = document.querySelector("#support-message-input");
-    textarea?.focus();
-    textarea?.setSelectionRange?.(textarea.value.length, textarea.value.length);
+  if (action === "open-support") {
+    openSupportTelegram();
     return;
   }
 
@@ -2538,35 +2492,6 @@ document.addEventListener("submit", async (event) => {
     return;
   }
 
-  if (formType === "support") {
-    const body = trimSupportMessage(new FormData(form).get("body"));
-
-    if (!body) {
-      showToast("Напиши вопрос для поддержки.", true);
-      return;
-    }
-
-    state.supportLoading = true;
-    render();
-
-    try {
-      const response = await api("/api/support/messages", {
-        method: "POST",
-        body: { body },
-      });
-      state.supportMessages = response.messages || [];
-      state.supportLoaded = true;
-      state.supportDraft = "";
-      showToast("Сообщение отправлено в поддержку.");
-    } catch (error) {
-      showToast(error.message, true);
-    } finally {
-      state.supportLoading = false;
-      render();
-    }
-    return;
-  }
-
   if (formType === "rating") {
     const trackId = form.dataset.trackId;
     const score = Number(new FormData(form).get("score"));
@@ -2630,12 +2555,6 @@ function trimComment(value) {
     .slice(0, 280);
 }
 
-function trimSupportMessage(value) {
-  return String(value || "")
-    .trim()
-    .slice(0, 500);
-}
-
 document.addEventListener("input", (event) => {
   const target = event.target;
 
@@ -2644,13 +2563,6 @@ document.addEventListener("input", (event) => {
     searchTimer = setTimeout(() => {
       void runSearch(target.value);
     }, 260);
-  }
-
-  if (
-    target instanceof HTMLTextAreaElement &&
-    target.id === "support-message-input"
-  ) {
-    state.supportDraft = target.value.slice(0, 500);
   }
 
   if (
@@ -2751,5 +2663,86 @@ document.addEventListener(
   },
   true,
 );
+
+let searchOverlayTimeout = null;
+
+function openSearchOverlay() {
+  const overlay = document.getElementById('search-overlay');
+  const overlayInput = document.getElementById('search-overlay-input');
+  const resultsPanel = document.getElementById('search-results-panel');
+  if (!overlay || !overlayInput) return;
+  
+  overlay.classList.add('is-visible');
+  overlayInput.value = '';
+  resultsPanel.innerHTML = '';
+  setTimeout(() => overlayInput.focus(), 100);
+}
+
+function closeSearchOverlay() {
+  const overlay = document.getElementById('search-overlay');
+  if (!overlay) return;
+  overlay.classList.remove('is-visible');
+}
+
+async function performSearchOverlay(query) {
+  if (!query.trim()) {
+    document.getElementById('search-results-panel').innerHTML = '';
+    return;
+  }
+  
+  const data = await api('/api/search?q=' + encodeURIComponent(query));
+  const panel = document.getElementById('search-results-panel');
+  
+  if (!data.artists?.length && !data.tracks?.length) {
+    panel.innerHTML = '<div class="empty-state">Ничего не найдено</div>';
+    return;
+  }
+  
+  let html = '';
+  
+  if (data.artists?.length) {
+    html += '<div class="section-head"><h3>Артисты</h3></div>';
+    html += data.artists.slice(0, 5).map(a => `
+      <div class="list-item" data-action="open-artist" data-artist-id="${a.artist.id}">
+        <div class="list-art"><img src="${a.artist.avatarUrl || '/assets/avatar.svg'}" alt=""></div>
+        <div class="list-info">
+          <div class="list-name">${a.artist.name}</div>
+          <div class="list-meta">${a.artist.styles?.join(', ') || ''}</div>
+        </div>
+      </div>
+    `).join('');
+  }
+  
+  panel.innerHTML = html;
+}
+
+document.addEventListener('click', (e) => {
+  const searchInput = document.getElementById('search-input');
+  const overlay = document.getElementById('search-overlay');
+  const closeBtn = document.getElementById('search-close-btn');
+  
+  if (e.target === searchInput || e.target.closest('#topbar-search')) {
+    openSearchOverlay();
+  }
+  
+  if (e.target === closeBtn || (overlay && !overlay.contains(e.target) && e.target.id !== 'search-input')) {
+    closeSearchOverlay();
+  }
+});
+
+document.addEventListener('input', (e) => {
+  if (e.target.id === 'search-overlay-input') {
+    clearTimeout(searchOverlayTimeout);
+    searchOverlayTimeout = setTimeout(() => {
+      performSearchOverlay(e.target.value);
+    }, 300);
+  }
+});
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    closeSearchOverlay();
+  }
+});
 
 start();

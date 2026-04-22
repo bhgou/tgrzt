@@ -5,12 +5,22 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>Admin Panel - Demo Stage</title>
   <link rel="stylesheet" href="styles.css">
-  <link rel="stylesheet" href="css/admin.css">
-  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <link rel="stylesheet" href="css/admin.css?v=2">
 </head>
 <body class="admin-body">
   <div id="app-container">
-    <header class="admin-header">
+    <div id="login-screen">
+      <div class="login-box">
+        <h1>Demo Stage Admin</h1>
+        <form id="login-form">
+          <input type="password" id="token-input" placeholder="Секретный токен" required />
+          <button type="submit">Войти</button>
+        </form>
+        <p id="login-error" class="error-msg"></p>
+      </div>
+    </div>
+
+    <header class="admin-header" id="admin-header" style="display:none">
       <div class="header-content">
         <h1>Demo Stage Admin</h1>
         <div id="admin-user-info"></div>
@@ -22,6 +32,6 @@
     <div id="toast-container"></div>
   </div>
 
-  <script type="module" src="js/admin.js"></script>
+  <script type="module" src="js/admin.js?v=2"></script>
 </body>
 </html>

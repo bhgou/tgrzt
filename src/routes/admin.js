@@ -5,20 +5,37 @@ import {
   adminDeleteTrack, 
   addNews, 
   deleteNews, 
+  addBanner,
+  getAllBanners,
+  updateBanner,
+  deleteBanner,
   adminCreateBattle,
   resolveDailyBattles,
   createDailyBattles,
   getWeeklySummary,
-  markWeeklySummaryPosted
+  markWeeklySummaryPosted,
+  getBootstrapData,
+  getAllNews
 } from '../database.js';
 import { sendJson, readJson } from '../http.js';
 import { trimText, httpError } from '../utils.js';
 import { config } from '../config.js';
+import { mapUserForClient } from '../mappings.js';
 
 export async function handleAdminRequest(req, res, pathname, sessionUser) {
   // Security check
   if (!sessionUser?.isAdmin) {
     throw httpError(403, 'Только для администраторов.');
+  }
+
+  if (req.method === 'GET' && pathname === '/api/admin/bootstrap') {
+    console.log('[admin] /api/admin/bootstrap called, sessionUser:', sessionUser);
+    const data = getBootstrapData(sessionUser.id);
+    sendJson(res, 200, {
+      me: mapUserForClient(data.me),
+      news: getAllNews(),
+    });
+    return;
   }
 
   if (req.method === 'GET' && pathname === '/api/admin/users') {
@@ -56,6 +73,31 @@ export async function handleAdminRequest(req, res, pathname, sessionUser) {
   const deleteNewsMatch = pathname.match(/^\/api\/admin\/news\/(\d+)$/);
   if (req.method === 'DELETE' && deleteNewsMatch) {
     deleteNews(deleteNewsMatch[1]);
+    sendJson(res, 200, { ok: true });
+    return;
+  }
+
+  if (req.method === 'GET' && pathname === '/api/admin/banners') {
+    sendJson(res, 200, { banners: getAllBanners() });
+    return;
+  }
+
+  if (req.method === 'POST' && pathname === '/api/admin/banners') {
+    const body = await readJson(req, config.maxJsonBytes);
+    const banner = addBanner(body);
+    sendJson(res, 200, { ok: true, banner });
+    return;
+  }
+
+  const bannerMatch = pathname.match(/^\/api\/admin\/banners\/(\d+)$/);
+  if (req.method === 'PATCH' && bannerMatch) {
+    const body = await readJson(req, config.maxJsonBytes);
+    updateBanner(bannerMatch[1], body);
+    sendJson(res, 200, { ok: true });
+    return;
+  }
+  if (req.method === 'DELETE' && bannerMatch) {
+    deleteBanner(bannerMatch[1]);
     sendJson(res, 200, { ok: true });
     return;
   }

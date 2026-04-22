@@ -63,9 +63,12 @@ export const config = {
     'Techno'
   ],
   defaultElo: 1200,
+  adminSecretToken: process.env.ADMIN_SECRET_TOKEN ?? '',
+  supportTelegramId: process.env.SUPPORT_TELEGRAM_ID ?? '',
 };
 
 export function isAdminIdentity(identity) {
+  if (identity?.isAdmin === true) return true;
   const telegramId = String(identity?.telegramId ?? identity?.telegram_id ?? '');
   const username = String(identity?.username ?? '').trim().toLowerCase();
 

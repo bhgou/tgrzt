@@ -144,6 +144,19 @@ db.exec(`
     created_at TEXT NOT NULL
   );
 
+  CREATE TABLE IF NOT EXISTS banners (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    body TEXT NOT NULL,
+    link TEXT,
+    link_text TEXT,
+    image_url TEXT,
+    bg_color TEXT DEFAULT '#1a1f3a',
+    text_color TEXT DEFAULT '#f7f3ea',
+    is_active INTEGER DEFAULT 1,
+    created_at TEXT NOT NULL
+  );
+
   CREATE INDEX IF NOT EXISTS idx_tracks_owner_id ON tracks (owner_id);
   CREATE INDEX IF NOT EXISTS idx_tracks_created_at ON tracks (created_at DESC);
   CREATE INDEX IF NOT EXISTS idx_comments_track_id ON comments (track_id, created_at DESC);
@@ -1723,6 +1736,86 @@ export function getAllNews() {
 
 export function deleteNews(newsId) {
   db.prepare(`DELETE FROM news WHERE id = ?`).run(Number(newsId));
+  return { ok: true };
+}
+
+export function addBanner(banner) {
+  const timestamp = nowIso();
+  const id = db.prepare(`
+    INSERT INTO banners (title, body, link, link_text, image_url, bg_color, text_color, is_active, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    banner.title,
+    banner.body,
+    banner.link || '',
+    banner.link_text || '',
+    banner.image_url || '',
+    banner.bg_color || '#1a1f3a',
+    banner.text_color || '#f7f3ea',
+    banner.is_active ? 1 : 0,
+    timestamp
+  ).lastInsertRowid;
+  return { id, ...banner, createdAt: timestamp };
+}
+
+export function getAllBanners() {
+  return db.prepare(`SELECT * FROM banners ORDER BY created_at DESC`).all().map(row => ({
+    id: row.id,
+    title: row.title,
+    body: row.body,
+    link: row.link,
+    link_text: row.link_text,
+    image_url: row.image_url,
+    bg_color: row.bg_color,
+    text_color: row.text_color,
+    is_active: Boolean(row.is_active),
+    createdAt: row.created_at
+  }));
+}
+
+export function getActiveBanners() {
+  return db.prepare(`SELECT * FROM banners WHERE is_active = 1 ORDER BY created_at DESC`).all().map(row => ({
+    id: row.id,
+    title: row.title,
+    body: row.body,
+    link: row.link,
+    link_text: row.link_text,
+    image_url: row.image_url,
+    bg_color: row.bg_color,
+    text_color: row.text_color,
+    is_active: Boolean(row.is_active),
+    createdAt: row.created_at
+  }));
+}
+
+export function updateBanner(bannerId, updates) {
+  db.prepare(`
+    UPDATE banners SET
+      title = COALESCE(?, title),
+      body = COALESCE(?, body),
+      link = COALESCE(?, link),
+      link_text = COALESCE(?, link_text),
+      image_url = COALESCE(?, image_url),
+      bg_color = COALESCE(?, bg_color),
+      text_color = COALESCE(?, text_color),
+      is_active = COALESCE(?, is_active)
+    WHERE id = ?
+  `).run(
+    updates.title,
+    updates.body,
+    updates.link,
+    updates.link_text,
+    updates.image_url,
+    updates.bg_color,
+    updates.text_color,
+    updates.is_active !== undefined ? (updates.is_active ? 1 : 0) : null,
+    Number(bannerId)
+  );
+  return { ok: true };
+}
+
+export function deleteBanner(bannerId) {
+  db.prepare(`DELETE FROM banners WHERE id = ?`).run(Number(bannerId));
   return { ok: true };
 }
 
