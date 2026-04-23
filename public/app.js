@@ -1,6 +1,8 @@
-import { api as apiRequest } from './api.js';
-import { state as initialState } from './state.js';
-import { escapeHtml, formatDate, formatDateTime, formatFollowers, pluralizeRu } from './ui-utils.js';
+const tg = window.Telegram?.WebApp;
+tg?.ready?.();
+tg?.expand?.();
+tg?.setHeaderColor?.("#0d1024");
+tg?.setBackgroundColor?.("#0d1024");
 
 const state = {
   activeView: "home",
@@ -58,6 +60,8 @@ const state = {
 
 const elements = {
   app: document.querySelector("#app"),
+  supportBackdrop: document.querySelector("#support-backdrop"),
+  supportDrawer: document.querySelector("#support-drawer"),
   supportToggle: document.querySelector("#support-toggle"),
   toast: document.querySelector("#toast"),
   topbarMeta: document.querySelector("#topbar-meta"),
@@ -134,6 +138,19 @@ function formatRating(value) {
   return Number(value || 0).toFixed(1);
 }
 
+function formatFollowers(value) {
+  return new Intl.NumberFormat("ru-RU").format(Number(value || 0));
+}
+
+function pluralizeRu(n, one, few, many) {
+  const abs = Math.abs(Math.trunc(n)) % 100;
+  const mod10 = abs % 10;
+  if (abs > 10 && abs < 20) return many;
+  if (mod10 === 1) return one;
+  if (mod10 >= 2 && mod10 <= 4) return few;
+  return many;
+}
+
 function getViewLabel(view) {
   if (view === "search") {
     return "поиск";
@@ -193,27 +210,6 @@ function getRoleDescription(role) {
   return "Профиль ещё не завершён.";
 }
 
-function getArtistLabel(artist) {
-  if (!artist) {
-    return "Исполнитель";
-  }
-
-  const name =
-    artist.displayName ||
-    artist.nickname ||
-    artist.username ||
-    [artist.firstName, artist.lastName].filter(Boolean).join(" ");
-
-  return name ? String(name).trim() : "Исполнитель";
-}
-
-function formatTime(seconds) {
-  const secs = Math.max(0, Math.floor(Number(seconds) || 0));
-  const minutes = Math.floor(secs / 60);
-  const remainder = secs % 60;
-  return `${minutes}:${String(remainder).padStart(2, "0")}`;
-}
-
 function isArtist(user) {
   return user?.role === "artist";
 }
@@ -253,7 +249,35 @@ function showToast(message, isError = false) {
   }, 3200);
 }
 
-// api helper already imported
+async function api(path, options = {}) {
+  const headers = new Headers(options.headers || {});
+  const initData = tg?.initData || "";
+
+  if (initData) {
+    headers.set("X-Telegram-Init-Data", initData);
+  }
+
+  let body = options.body;
+
+  if (body && !(body instanceof FormData) && typeof body === "object") {
+    headers.set("Content-Type", "application/json");
+    body = JSON.stringify(body);
+  }
+
+  const response = await fetch(path, {
+    method: options.method || "GET",
+    headers,
+    body,
+  });
+
+  const data = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    throw new Error(data.error || "Запрос завершился с ошибкой.");
+  }
+
+  return data;
+}
 
 async function withPending(task, successMessage) {
   state.pending = true;
@@ -366,12 +390,36 @@ async function openArtistProfile(artistId, options = {}) {
   }
 }
 
-function openSupportTelegram() {
-  let supportId = state.supportTelegramId || state.botUsername;
-  if (supportId) {
-    supportId = supportId.replace('@', '');
-    window.open(`https://t.me/${supportId}`, '_blank');
+async function loadSupportMessages(options = {}) {
+  if (!options.silent) {
+    state.supportLoading = true;
+    render();
   }
+
+  try {
+    const response = await api("/api/support/messages");
+    state.supportMessages = response.messages || [];
+    state.supportLoaded = true;
+  } catch (error) {
+    showToast(error.message, true);
+  } finally {
+    state.supportLoading = false;
+    render();
+  }
+}
+
+async function openSupportChat() {
+  state.supportChatOpen = true;
+  render();
+
+  if (!state.supportLoaded) {
+    await loadSupportMessages();
+  }
+}
+
+function closeSupportChat() {
+  state.supportChatOpen = false;
+  render();
 }
 
 function renderAvatar(entity, className = "avatar") {
@@ -468,10 +516,6 @@ function renderTrackCard(track) {
     )
     .join("");
 
-  const miniCoverHtml = track.coverUrl
-    ? `<div class="mini-square-cover"><img src="${track.coverUrl}" alt="" /></div>`
-    : "";
-
   return `
     <article class="track-card">
       ${
@@ -480,10 +524,9 @@ function renderTrackCard(track) {
           : ""
       }
       <div class="track-head">
-        ${miniCoverHtml}
-        <div style="flex:1; min-width:0;">
+        <div>
           <p class="eyebrow">${formatDate(track.createdAt) || "Свежий релиз"}</p>
-          <h4 style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin:0;">${escapeHtml(track.title)}</h4>
+          <h4>${escapeHtml(track.title)}</h4>
           <span class="pill pill-genre">${escapeHtml(track.genre || "Demo tape")}</span>
         </div>
         <span class="rating-pill">${formatRating(track.averageRating)} / 10</span>
@@ -584,7 +627,87 @@ function renderTrackCard(track) {
   `;
 }
 
+function renderSupportBubble(message) {
+  const author = message.senderType === "user" ? "Вы" : "Поддержка";
 
+  return `
+    <div class="support-bubble ${message.senderType}">
+      <strong>${escapeHtml(author)}</strong>
+      <p>${escapeHtml(message.body)}</p>
+      <small class="muted">${escapeHtml(formatDateTime(message.createdAt))}</small>
+    </div>
+  `;
+}
+
+function renderSupportDrawer() {
+  if (!elements.supportDrawer || !elements.supportBackdrop) {
+    return;
+  }
+
+  const supportMessages = state.supportMessages.length
+    ? state.supportMessages
+    : [
+        {
+          id: "welcome",
+          senderType: "support",
+          body: "Поддержка на связи. Напиши сюда вопрос по ролям, загрузке WAV, Mini App, подпискам или модерации.",
+          createdAt: "",
+        },
+      ];
+
+  if (elements.supportToggle) {
+    elements.supportToggle.setAttribute(
+      "aria-label",
+      state.supportChatOpen ? "Закрыть чат поддержки" : "Открыть чат поддержки",
+    );
+    elements.supportToggle.classList.toggle("is-open", state.supportChatOpen);
+    elements.supportToggle.disabled = state.pending || state.supportLoading;
+  }
+  elements.supportBackdrop.classList.toggle(
+    "is-visible",
+    state.supportChatOpen,
+  );
+  elements.supportDrawer.classList.toggle("is-open", state.supportChatOpen);
+  elements.supportDrawer.setAttribute(
+    "aria-hidden",
+    state.supportChatOpen ? "false" : "true",
+  );
+  elements.supportDrawer.innerHTML = `
+    <div class="support-head">
+      <div>
+        <p class="eyebrow">Support chat</p>
+        <h3>Чат поддержки</h3>
+      </div>
+      <button class="support-close" type="button" data-action="support-close">✕</button>
+    </div>
+
+    <div class="support-note">
+      <strong>Если что-то не работает, напиши сюда.</strong>
+      <p class="muted">Поддержка помогает с ролями, загрузкой, Mini App, подписками и жалобами на контент.</p>
+    </div>
+
+    <div class="support-feed">
+      <div class="support-quick-list">
+        <button class="support-chip" type="button" data-action="support-prompt" data-message="Не открывается Mini App">Mini App</button>
+        <button class="support-chip" type="button" data-action="support-prompt" data-message="Не могу загрузить WAV">Загрузка WAV</button>
+        <button class="support-chip" type="button" data-action="support-prompt" data-message="Как переключиться на артиста?">Смена роли</button>
+      </div>
+      ${
+        state.supportLoading
+          ? '<div class="empty-state"><strong>Загружаю чат поддержки</strong><span class="muted">Пара секунд.</span></div>'
+          : supportMessages.map(renderSupportBubble).join("")
+      }
+    </div>
+
+    <form class="support-form" data-form="support">
+      <div class="field">
+        <label for="support-message-input">Сообщение в поддержку</label>
+        <textarea id="support-message-input" name="body" maxlength="500" placeholder="Например: у меня не открывается Mini App или не загружается WAV.">${escapeHtml(state.supportDraft)}</textarea>
+      </div>
+      <button class="btn" ${state.supportLoading ? "disabled" : ""}>Отправить в поддержку</button>
+    </form>
+  `;
+}
 
 // =================== TRACK MODAL ===================
 function findTrackInState(trackId) {
@@ -945,39 +1068,6 @@ function renderCompactTrackCard(track, options = {}) {
   `;
 }
 
-function renderTrackGridCard(track) {
-  const coverHtml = track.coverUrl
-    ? `<span class="avatar"><img src="${track.coverUrl}" alt="${escapeHtml(track.title)}" /></span>`
-    : renderAvatar(track.artist, "avatar");
-
-  return `
-    <article class="release-card" data-action="open-track" data-track-id="${track.id}">
-      ${coverHtml}
-      <div class="release-card-info">
-        <strong>${escapeHtml(track.title)}</strong>
-        <span class="muted">@${escapeHtml(track.artist.nickname || track.artist.username || "artist")}</span>
-      </div>
-    </article>
-  `;
-}
-
-function renderTrackGridSection(title, tracks, emptyMessage) {
-  return `
-    <section class="panel">
-      <div class="section-head">
-        <div>
-          <h3>${escapeHtml(title)}</h3>
-        </div>
-      </div>
-      ${
-        tracks.length
-          ? `<div class="release-grid">${tracks.map(renderTrackGridCard).join("")}</div>`
-          : `<div class="empty-state"><strong>${escapeHtml(emptyMessage)}</strong></div>`
-      }
-    </section>
-  `;
-}
-
 function renderCompactTracksSection(title, tracks, emptyMessage, options = {}) {
   return `
     <section class="panel compact-section">
@@ -1047,8 +1137,8 @@ function renderTopArtistsSection(artists) {
     <section class="panel top-artists-panel">
       <div class="section-head">
         <div>
-          <p class="eyebrow">Monthly top</p>
-          <h3>Топ артистов</h3>
+          <p class="eyebrow">Top artists by month</p>
+          <h3>Топ артистов месяца</h3>
         </div>
       </div>
       ${
@@ -1223,216 +1313,27 @@ const NEWS_ITEMS = [
   },
 ];
 
-async function loadBattles() {
-  state.pending = true;
-  render();
-  try {
-    const response = await api("/api/battles");
-    state.activeBattles = response.battles || [];
-  } catch (error) {
-    showToast(error.message, true);
-  } finally {
-    state.pending = false;
-    render();
-  }
-}
-
-async function loadLeaderboard() {
-  state.pending = true;
-  render();
-  try {
-    const response = await api("/api/leaderboard");
-    state.leaderboard = response.tracks || [];
-  } catch (error) {
-    showToast(error.message, true);
-  } finally {
-    state.pending = false;
-    render();
-  }
-}
-
-async function voteInBattle(battleId, votedTrackId) {
-  await withPending(async () => {
-    await api(`/api/battles/${battleId}/vote`, {
-      method: "POST",
-      body: { votedTrackId }
-    });
-    showToast("Голос принят!");
-    await loadBattles();
-  });
-}
-
-function renderArenaView() {
-  const activeTab = state.arenaTab || "battles";
-
+function renderNewsSection() {
   return `
-    <section class="panel stack">
-      <div class="section-head">
+    <section class="panel news-panel">
+      <div class="section-head section-head--compact">
         <div>
-          <p class="eyebrow">Battle Arena</p>
-          <h3>Арена</h3>
+          <p class="eyebrow">What's new</p>
+          <h3>Что нового</h3>
         </div>
       </div>
-
-      <div class="tab-switcher">
-        <button class="tab-btn ${activeTab === "battles" ? "is-active" : ""}" data-action="switch-arena-tab" data-tab="battles">Батттлы</button>
-        <button class="tab-btn ${activeTab === "leaderboard" ? "is-active" : ""}" data-action="switch-arena-tab" data-tab="leaderboard">Рейтинг ELO</button>
-      </div>
-      
-      ${
-        activeTab === "battles"
-          ? `
-        <div class="battle-list">
-          ${state.activeBattles.length ? "" : '<div class="empty-state"><strong>Пока нет активных баттлов</strong><span class="muted">Заходи позже, когда появятся новые пары.</span></div>'}
-          ${state.activeBattles.map(battle => `
-            <article class="battle-card">
-              <div class="battle-card-header">
-                <div>
-                  <span class="battle-genre-tag">${escapeHtml(battle.genre)}</span>
-                  <h3>${escapeHtml(battle.trackA.title)} vs ${escapeHtml(battle.trackB.title)}</h3>
-                </div>
-                <span class="battle-status ${battle.hasVoted ? 'is-voted' : ''}">${battle.hasVoted ? 'Голос отдан' : 'Голосуй сейчас'}</span>
-              </div>
-              <div class="battle-vs-container">
-                <div class="battle-side ${battle.hasVoted ? 'is-voted' : ''}">
-                  <div class="battle-track-card">
-                    <div class="battle-track-thumb">
-                      ${battle.trackA.coverUrl ? `<img src="${battle.trackA.coverUrl}" alt="${escapeHtml(battle.trackA.title)}" />` : '<span class="avatar-placeholder">🎵</span>'}
-                    </div>
-                    <div class="battle-track-meta">
-                      <span class="eyebrow">Трек A</span>
-                      <strong>${escapeHtml(battle.trackA.title)}</strong>
-                      <span class="battle-artist">Исполнитель: ${escapeHtml(getArtistLabel(battle.trackA.artist))}</span>
-                    </div>
-                  </div>
-                  <div class="battle-player">
-                    <audio class="battle-audio" preload="metadata" data-track-id="${battle.trackA.id}" src="${battle.trackA.mp3Url}"></audio>
-                    <div class="battle-player-controls">
-                      <button type="button" class="battle-play-toggle" data-action="battle-toggle-play" data-track-id="${battle.trackA.id}" aria-label="Play/Pause">▶</button>
-                      <div class="battle-player-progress">
-                        <span class="battle-player-time" data-player-time="${battle.trackA.id}">0:00</span>
-                        <input type="range" min="0" max="100" value="0" class="battle-seek" data-action="battle-seek" data-track-id="${battle.trackA.id}" />
-                        <span class="battle-player-duration" data-player-duration="${battle.trackA.id}">0:00</span>
-                      </div>
-                      <div class="battle-player-volume">
-                        <span class="battle-volume-icon">🔊</span>
-                        <input type="range" min="0" max="1" step="0.01" value="${state.player.volume}" class="battle-volume-slider" data-action="battle-volume" data-track-id="${battle.trackA.id}" />
-                      </div>
-                    </div>
-                  </div>
-                  <button class="btn battle-vote-btn ${battle.hasVoted ? 'btn-ghost' : ''}" 
-                    data-action="vote-battle" 
-                    data-battle-id="${battle.id}" 
-                    data-track-id="${battle.trackA.id}"
-                    ${battle.hasVoted ? 'disabled' : ''}>
-                    ${battle.hasVoted ? 'Голос отдан' : 'Выбрать A'}
-                  </button>
-                </div>
-
-                <div class="vs-divider">VS</div>
-
-                <div class="battle-side ${battle.hasVoted ? 'is-voted' : ''}">
-                  <div class="battle-track-card">
-                    <div class="battle-track-thumb">
-                      ${battle.trackB.coverUrl ? `<img src="${battle.trackB.coverUrl}" alt="${escapeHtml(battle.trackB.title)}" />` : '<span class="avatar-placeholder">🎵</span>'}
-                    </div>
-                    <div class="battle-track-meta">
-                      <span class="eyebrow">Трек B</span>
-                      <strong>${escapeHtml(battle.trackB.title)}</strong>
-                      <span class="battle-artist">Исполнитель: ${escapeHtml(getArtistLabel(battle.trackB.artist))}</span>
-                    </div>
-                  </div>
-                  <div class="battle-player">
-                    <audio class="battle-audio" preload="metadata" data-track-id="${battle.trackB.id}" src="${battle.trackB.mp3Url}"></audio>
-                    <div class="battle-player-controls">
-                      <button type="button" class="battle-play-toggle" data-action="battle-toggle-play" data-track-id="${battle.trackB.id}" aria-label="Play/Pause">▶</button>
-                      <div class="battle-player-progress">
-                        <span class="battle-player-time" data-player-time="${battle.trackB.id}">0:00</span>
-                        <input type="range" min="0" max="100" value="0" class="battle-seek" data-action="battle-seek" data-track-id="${battle.trackB.id}" />
-                        <span class="battle-player-duration" data-player-duration="${battle.trackB.id}">0:00</span>
-                      </div>
-                      <div class="battle-player-volume">
-                        <span class="battle-volume-icon">🔊</span>
-                        <input type="range" min="0" max="1" step="0.01" value="${state.player.volume}" class="battle-volume-slider" data-action="battle-volume" data-track-id="${battle.trackB.id}" />
-                      </div>
-                    </div>
-                  </div>
-                  <button class="btn battle-vote-btn ${battle.hasVoted ? 'btn-ghost' : ''}" 
-                    data-action="vote-battle" 
-                    data-battle-id="${battle.id}" 
-                    data-track-id="${battle.trackB.id}"
-                    ${battle.hasVoted ? 'disabled' : ''}>
-                    ${battle.hasVoted ? 'Голос отдан' : 'Выбрать B'}
-                  </button>
-                </div>
-              </div>
-              <div class="battle-footer">
-                <span class="muted">Заканчивается: ${formatDateTime(battle.expiresAt)}</span>
+      <div class="news-rail">
+        ${NEWS_ITEMS.map(
+          (item) => `
+            <article class="news-card">
+              <span class="news-icon">${item.icon}</span>
+              <div class="news-text">
+                <strong>${escapeHtml(item.title)}</strong>
+                <span class="muted">${escapeHtml(item.body)}</span>
               </div>
             </article>
-          `).join('')}
-        </div>
-      `
-          : `
-        <div class="leaderboard-list">
-          ${state.leaderboard.map((track, index) => `
-            <div class="leaderboard-item" data-action="open-track" data-track-id="${track.id}">
-              <span class="rank">${index + 1}</span>
-              <div class="mini-square-cover">
-                ${track.coverUrl ? `<img src="${track.coverUrl}" />` : '<span class="avatar-placeholder">🎵</span>'}
-              </div>
-              <div class="track-meta">
-                <strong>${escapeHtml(track.title)}</strong>
-                <span class="muted">@${escapeHtml(track.artist.nickname)} · ${escapeHtml(track.genre)}</span>
-              </div>
-              <div class="elo-score">
-                <strong>${track.elo}</strong>
-                <small>ELO</small>
-              </div>
-            </div>
-          `).join('')}
-        </div>
-      `
-      }
-    </section>
-  `;
-}
-
-function renderBannersSection() {
-  if (!state.banners?.length) return '';
-  
-  if (state.banners.length === 1) {
-    const b = state.banners[0];
-    return `
-      <section class="banners-section">
-        <a href="${b.link ? escapeHtml(b.link) : '#'}" target="_blank" class="home-banner ${b.link ? 'is-clickable' : ''}" style="background: ${b.image_url ? `url(${escapeHtml(b.image_url)}) center/cover no-repeat, ${escapeHtml(b.bg_color)}` : escapeHtml(b.bg_color)}; color: ${escapeHtml(b.text_color)};">
-          <div class="banner-content">
-            <h3>${escapeHtml(b.title)}</h3>
-            <p>${escapeHtml(b.body)}</p>
-          </div>
-        </a>
-      </section>
-    `;
-  }
-  
-  return `
-    <section class="banners-section">
-      <div class="banner-carousel" id="banner-carousel">
-        ${state.banners.map((b, i) => `
-          <a href="${b.link ? escapeHtml(b.link) : '#'}" target="_blank" class="banner-slide ${i === 0 ? 'active' : ''}" data-slide="${i}">
-            <div class="home-banner" style="background: ${b.image_url ? `url(${escapeHtml(b.image_url)}) center/cover no-repeat, ${escapeHtml(b.bg_color)}` : escapeHtml(b.bg_color)}; color: ${escapeHtml(b.text_color)};">
-              <div class="banner-content">
-                <h3>${escapeHtml(b.title)}</h3>
-                <p>${escapeHtml(b.body)}</p>
-              </div>
-            </div>
-          </a>
-        `).join('')}
-        <div class="banner-dots">
-          ${state.banners.map((_, i) => `
-            <button class="banner-dot ${i === 0 ? 'active' : ''}" data-dot="${i}"></button>
-          `).join('')}
-        </div>
+          `,
+        ).join("")}
       </div>
     </section>
   `;
@@ -1475,20 +1376,6 @@ function renderLatestTracksSection(tracks) {
 function renderHomeView() {
   const topArtists = state.topArtists.slice(0, 5);
   const popularArtists = state.topArtists.slice(5);
-
-  const searchResultsSection = state.searchQuery.trim()
-    ? state.searchResults.artists.length
-      ? `
-        <section class="panel compact-section">
-          <div class="artist-list search-result-list">${state.searchResults.artists.map(renderArtistListCard).join("")}</div>
-        </section>
-      `
-      : `
-        <section class="panel compact-section">
-          <div class="empty-state"><strong>Ничего не найдено</strong></div>
-        </section>
-      `
-    : "";
 
   return `
     ${renderNewsSection()}
@@ -1542,9 +1429,9 @@ function renderUploadView() {
         <p class="eyebrow">Upload locked</p>
         <h3>Загрузка доступна только артистам</h3>
         <p class="muted">${escapeHtml(description)}</p>
-          <div class="cta-row">
-            <button class="btn" onclick="window.open('/admin.html', '_blank')">Открыть админку</button>
-          </div>
+        <div class="cta-row">
+          <button class="btn" data-action="jump-view" data-view="profile">Перейти в кабинет</button>
+        </div>
       </section>
     `;
   }
@@ -1599,9 +1486,9 @@ function renderArtistProfileView() {
         <p class="eyebrow">Artist not found</p>
         <h3>Профиль артиста пока недоступен</h3>
         <p class="muted">Открой поиск или главную и попробуй выбрать артиста снова.</p>
-          <div class="cta-row">
-            <button class="btn" onclick="window.open('/admin.html', '_blank')">Открыть админку</button>
-          </div>
+        <div class="cta-row">
+          <button class="btn" data-action="jump-view" data-view="search">Перейти в поиск</button>
+        </div>
       </section>
     `;
   }
@@ -1612,37 +1499,40 @@ function renderArtistProfileView() {
   const tracksLabel = pluralizeRu(tracksCount, "трек", "трека", "треков");
 
   return `
-    <div class="view-content stack">
-      <section class="panel artist-profile-panel">
-        <div class="artist-row">
-          ${renderAvatar(artist, "avatar avatar-lg")}
-          <div class="profile-head">
-            <h2>${escapeHtml(artist.displayName)}</h2>
-            <p class="muted">@${escapeHtml(artist.nickname || artist.username || "artist")}</p>
-          </div>
+    <section class="panel artist-profile-panel">
+      <div class="artist-row">
+        ${renderAvatar(artist, "avatar avatar-lg")}
+        <div class="profile-head">
+          <h2>${escapeHtml(artist.displayName)}</h2>
+          <p class="muted">@${escapeHtml(artist.nickname || artist.username || "artist")}</p>
         </div>
+      </div>
 
-        ${artist.bio ? `<p class="track-description">${escapeHtml(artist.bio)}</p>` : ""}
+      ${artist.bio ? `<p class="track-description">${escapeHtml(artist.bio)}</p>` : ""}
 
-        <div class="profile-stats-text">
-          <span><strong>${formatFollowers(playsCount)}</strong> ${pluralizeRu(playsCount, "прослушивание", "прослушивания", "прослушиваний")}</span>
-          <span><strong>${formatFollowers(artist.followersCount)}</strong> подписчиков</span>
-          <span><strong>${artist.totalElo || 0}</strong> Elo</span>
-          <span><strong>#${artist.globalRank || '?'}</strong> рейтинг</span>
+      <div class="profile-stats artist-profile-stats--duo">
+        <div class="stat-tile">
+          <strong>${formatFollowers(playsCount)}</strong>
+          <span class="muted">${pluralizeRu(playsCount, "прослушивание", "прослушивания", "прослушиваний")}</span>
         </div>
+        <div class="stat-tile">
+          <strong>${formatFollowers(artist.followersCount)}</strong>
+          <span class="muted">подписчиков</span>
+        </div>
+      </div>
 
-        ${
-          artist.id === state.me?.id
-            ? ""
-            : `
-              <div class="cta-row artist-profile-actions">
-                <button class="btn" data-action="toggle-follow" data-artist-id="${artist.id}">
-                  ${artist.isFollowing ? "Вы подписаны" : "Подписаться"}
-                </button>
-              </div>
-            `
-        }
-      </section>
+      ${
+        artist.id === state.me?.id
+          ? ""
+          : `
+            <div class="cta-row artist-profile-actions">
+              <button class="btn" data-action="toggle-follow" data-artist-id="${artist.id}">
+                ${artist.isFollowing ? "Вы подписаны" : "Подписаться"}
+              </button>
+            </div>
+          `
+      }
+    </section>
 
     ${renderCompactTracksSection(
       `${tracksCount} ${tracksLabel}`,
@@ -1754,49 +1644,42 @@ function renderProfileView() {
   }
 
   return `
-    <div class="view-content stack">
-      <section class="panel profile-summary-panel">
-        <div class="artist-row">
-          ${renderAvatar(state.me, "avatar avatar-lg")}
-          <div class="profile-head">
-            <h2>${escapeHtml(state.me.displayName)}</h2>
-            <p class="muted">@${escapeHtml(state.me.nickname || state.me.username || "profile")}</p>
-          </div>
-          <div class="spacer"></div>
-          <button class="btn-ghost" data-action="logout">Выйти</button>
+    <section class="panel profile-summary-panel">
+      <div class="artist-row">
+        ${renderAvatar(state.me, "avatar avatar-lg")}
+        <div class="profile-head">
+          <h2>${escapeHtml(state.me.displayName)}</h2>
+          <p class="muted">@${escapeHtml(state.me.nickname || state.me.username || "profile")}</p>
         </div>
+        <div class="spacer"></div>
+        <button class="btn-ghost" data-action="logout">Выйти</button>
+      </div>
 
-        ${state.me.bio ? `<p class="track-description">${escapeHtml(state.me.bio)}</p>` : ""}
+      ${state.me.bio ? `<p class="track-description">${escapeHtml(state.me.bio)}</p>` : ""}
 
-        <div class="profile-stats-text">
-          <span><strong>${formatFollowers(state.me.followersCount)}</strong> подписчиков</span>
-          <span><strong>${formatFollowers(state.me.tracksCount)}</strong> релизов</span>
-          ${isArtist(state.me) ? `
-            <span><strong>${state.me.totalElo || 0}</strong> Elo</span>
-            <span><strong>#${state.me.globalRank || '?'}</strong> рейтинг</span>
-          ` : `
-            <span><strong>${formatFollowers(state.me.followingCount)}</strong> подписок</span>
-            <span><strong>${formatFollowers(state.me.likedTracksCount)}</strong> лайков</span>
-          `}
+      <div class="profile-stats clean-profile-stats">
+        <div class="stat-tile">
+          <strong>${formatFollowers(state.me.followersCount)}</strong>
+          <span class="muted">подписчиков</span>
         </div>
-      </section>
+        <div class="stat-tile">
+          <strong>${formatFollowers(state.me.tracksCount)}</strong>
+          <span class="muted">релизов</span>
+        </div>
+        <div class="stat-tile">
+          <strong>${formatFollowers(state.me.followingCount)}</strong>
+          <span class="muted">подписок</span>
+        </div>
+        <div class="stat-tile">
+          <strong>${formatFollowers(state.me.likedTracksCount)}</strong>
+          <span class="muted">лайкнутых треков</span>
+        </div>
+      </div>
+    </section>
 
-      ${renderInvitePanel()}
+    ${renderInvitePanel()}
 
-      ${state.me.isAdmin ? `
-        <section class="panel admin-cta-panel">
-          <div class="section-head">
-            <div>
-              <p class="eyebrow">Admin tools</p>
-              <h3>Панель управления</h3>
-              <p class="muted">Инструменты для модерации контента и пользователей.</p>
-            </div>
-          </div>
-          <div class="cta-row">
-            <button class="btn" onclick="window.open('/admin.html', '_blank')">Открыть админку</button>
-          </div>
-        </section>
-      ` : ""}
+    ${state.me.isAdmin ? renderAdminPanel() : ""}
 
     ${isArtist(state.me) ? renderMyTracksPanel() : ""}
 
@@ -1898,7 +1781,22 @@ function renderInviterChip(inv) {
   `;
 }
 
-// Admin panel moved to admin.html
+function renderAdminPanel() {
+  return `
+    <section class="panel admin-panel">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">Admin tools</p>
+          <h3>Еженедельный итог</h3>
+        </div>
+      </div>
+      <p class="muted">Публикация топ-3 треков, общих прослушиваний и выбора редакции в канал (CHANNEL_ID из .env). Автоматически пушится каждое воскресенье 18:00 UTC, можно вручную.</p>
+      <div class="cta-row">
+        <button class="btn" data-action="post-weekly-summary">Отправить итог недели сейчас</button>
+      </div>
+    </section>
+  `;
+}
 
 function renderLikedView() {
   if (!state.me?.isRegistered) {
@@ -1997,21 +1895,20 @@ function renderTopbar() {
 function render() {
   renderTopbar();
   renderNavAvatar();
-  
-  const searchWrapper = document.getElementById('topbar-search');
-  if (searchWrapper) {
-    searchWrapper.style.display = state.activeView === 'home' ? '' : 'none';
-  }
 
   if (isListener(state.me) && state.activeView === "upload") {
     state.activeView = "profile";
   }
 
   elements.navButtons.forEach((button) => {
+    const isSupportButton = button.dataset.action === "support-toggle";
+
     button.hidden = button.dataset.view === "upload" && isListener(state.me);
     button.classList.toggle(
       "is-active",
-      button.dataset.view === state.activeView,
+      isSupportButton
+        ? state.supportChatOpen
+        : button.dataset.view === state.activeView,
     );
     button.disabled = state.pending;
   });
@@ -2027,6 +1924,7 @@ function render() {
   }
 
   if (state.loading) {
+    renderSupportDrawer();
     elements.app.innerHTML = renderLoadingView();
     return;
   }
@@ -2034,15 +1932,6 @@ function render() {
   switch (state.activeView) {
     case "search":
       elements.app.innerHTML = renderSearchView();
-      break;
-    case "news":
-      elements.app.innerHTML = renderNewsView();
-      break;
-    case "battle":
-      elements.app.innerHTML = renderArenaView();
-      break;
-    case "leaderboard":
-      elements.app.innerHTML = renderLeaderboardView();
       break;
     case "upload":
       elements.app.innerHTML = renderUploadView();
@@ -2059,82 +1948,10 @@ function render() {
     case "home":
     default:
       elements.app.innerHTML = renderHomeView();
-      initBannerCarousel();
       break;
   }
-}
 
-let bannerCarouselInterval = null;
-let currentBannerSlide = 0;
-
-function initBannerCarousel() {
-  const carousel = document.getElementById('banner-carousel');
-  if (!carousel || state.banners.length <= 1) return;
-  
-  clearInterval(bannerCarouselInterval);
-  currentBannerSlide = 0;
-  
-  carousel.querySelectorAll('.banner-dot').forEach((dot, i) => {
-    if (i === 0) {
-      dot.classList.add('active');
-      void dot.offsetWidth;
-      dot.classList.add('animate');
-    } else {
-      dot.classList.remove('active', 'animate');
-    }
-  });
-  
-  bannerCarouselInterval = setInterval(() => {
-    currentBannerSlide = (currentBannerSlide + 1) % state.banners.length;
-    goToBannerSlide(currentBannerSlide);
-  }, 5000);
-  
-  carousel.querySelectorAll('.banner-dot').forEach(dot => {
-    dot.addEventListener('click', () => {
-      const slideIndex = parseInt(dot.dataset.dot);
-      currentBannerSlide = slideIndex;
-      goToBannerSlide(slideIndex);
-      clearInterval(bannerCarouselInterval);
-      bannerCarouselInterval = setInterval(() => {
-        currentBannerSlide = (currentBannerSlide + 1) % state.banners.length;
-        goToBannerSlide(currentBannerSlide);
-      }, 5000);
-    });
-  });
-}
-
-function goToBannerSlide(index) {
-  const carousel = document.getElementById('banner-carousel');
-  if (!carousel) return;
-  
-  carousel.querySelectorAll('.banner-slide').forEach((slide, i) => {
-    slide.classList.toggle('active', i === index);
-  });
-  carousel.querySelectorAll('.banner-dot').forEach((dot, i) => {
-    if (i === index) {
-      dot.classList.add('active');
-      void dot.offsetWidth;
-      dot.classList.add('animate');
-    } else {
-      dot.classList.remove('active', 'animate');
-    }
-  });
-}
-
-async function loadAdminUsers() {
-  await withPending(async () => {
-    const data = await api("/api/admin/users");
-    state.adminUsers = data.users || [];
-    render();
-  });
-}
-
-async function loadAdminTracks() {
-  await withPending(async () => {
-    const data = await api("/api/admin/tracks");
-    state.adminTracks = data.tracks || [];
-    render();
-  });
+  renderSupportDrawer();
 }
 
 async function refreshAfterMutation(message) {
@@ -2262,7 +2079,11 @@ document.addEventListener("click", async (event) => {
     } else {
       await openSupportChat();
     }
-    render();
+    return;
+  }
+
+  if (event.target.closest("#support-backdrop")) {
+    closeSupportChat();
     return;
   }
 
@@ -2279,108 +2100,9 @@ document.addEventListener("click", async (event) => {
 
   const action = actionTarget.dataset.action;
 
-  if (action === "battle-toggle-play") {
-    const trackId = Number(actionTarget.dataset.trackId);
-    const audio = document.querySelector(`audio.battle-audio[data-track-id="${trackId}"]`);
-    if (!audio) {
-      return;
-    }
-
-    document.querySelectorAll("audio.battle-audio").forEach((other) => {
-      if (other !== audio) {
-        other.pause();
-        const otherButton = document.querySelector(`button.battle-play-toggle[data-track-id="${other.dataset.trackId}"]`);
-        if (otherButton) {
-          otherButton.textContent = "▶";
-        }
-      }
-    });
-
-    if (audio.paused) {
-      audio.play().catch(() => {});
-      actionTarget.textContent = "⏸";
-    } else {
-      audio.pause();
-      actionTarget.textContent = "▶";
-    }
-    return;
-  }
-
-  if (action === "switch-arena-tab") {
-    state.arenaTab = actionTarget.dataset.tab;
-    render();
-    return;
-  }
-
   if (action === "jump-view") {
     state.activeView = actionTarget.dataset.view;
-    if (state.activeView === "admin") {
-      if (state.adminTab === "users") await loadAdminUsers();
-      else if (state.adminTab === "tracks") await loadAdminTracks();
-    }
     render();
-    return;
-  }
-
-  if (action === "toggle-news") {
-    const card = actionTarget.closest('.news-card');
-    if (card) {
-      card.classList.toggle('is-expanded');
-    }
-    return;
-  }
-
-  // --- ADMIN ACTIONS ---
-  if (action === "admin-switch-tab") {
-    state.adminTab = actionTarget.dataset.tab;
-    if (state.adminTab === "users") await loadAdminUsers();
-    else if (state.adminTab === "tracks") await loadAdminTracks();
-    render();
-    return;
-  }
-
-  if (action === "admin-toggle-ban") {
-    const userId = actionTarget.dataset.userId;
-    const currentlyBanned = actionTarget.dataset.banned === "true";
-    await withPending(async () => {
-      await api(`/api/admin/users/${userId}/ban`, {
-        method: "POST",
-        body: { isBanned: !currentlyBanned }
-      });
-      showToast(currentlyBanned ? "Пользователь разбанен." : "Пользователь забанен.");
-      await loadAdminUsers();
-    });
-    return;
-  }
-
-  if (action === "admin-delete-track") {
-    if (!confirm("Удалить этот трек навсегда?")) return;
-    const trackId = actionTarget.dataset.trackId;
-    await withPending(async () => {
-      await api(`/api/admin/tracks/${trackId}`, { method: "DELETE" });
-      showToast("Трек удален.");
-      await loadAdminTracks();
-    });
-    return;
-  }
-
-  if (action === "admin-delete-news") {
-    if (!confirm("Удалить эту новость?")) return;
-    const newsId = actionTarget.dataset.newsId;
-    await withPending(async () => {
-      await api(`/api/admin/news/${newsId}`, { method: "DELETE" });
-      showToast("Новость удалена.");
-      await loadBootstrap({ silent: true });
-    });
-    return;
-  }
-
-  if (action === "admin-trigger-battles") {
-    await withPending(async () => {
-      const res = await api("/api/admin/battles/trigger", { method: "POST" });
-      showToast(`Баттлы обновлены. Завершено: ${res.resolvedCount}, Создано: ${res.createdCount}`);
-      await loadBootstrap({ silent: true });
-    });
     return;
   }
 
@@ -2453,15 +2175,26 @@ document.addEventListener("click", async (event) => {
     return;
   }
 
-  if (action === "open-support") {
-    openSupportTelegram();
+  if (action === "support-close") {
+    closeSupportChat();
     return;
   }
 
-  if (action === "vote-battle") {
-    const battleId = actionTarget.dataset.battleId;
-    const trackId = actionTarget.dataset.trackId;
-    await voteInBattle(battleId, trackId);
+  if (action === "support-toggle") {
+    if (state.supportChatOpen) {
+      closeSupportChat();
+    } else {
+      await openSupportChat();
+    }
+    return;
+  }
+
+  if (action === "support-prompt") {
+    state.supportDraft = actionTarget.dataset.message || "";
+    renderSupportDrawer();
+    const textarea = document.querySelector("#support-message-input");
+    textarea?.focus();
+    textarea?.setSelectionRange?.(textarea.value.length, textarea.value.length);
     return;
   }
 
@@ -2661,40 +2394,6 @@ document.addEventListener("submit", async (event) => {
 
   event.preventDefault();
 
-  if (formType === "admin-add-news") {
-    await withPending(async () => {
-      const formData = new FormData(form);
-      const title = String(formData.get("title"));
-      const bodyText = String(formData.get("body"));
-      await api("/api/admin/news", {
-        method: "POST",
-        body: { title, body: bodyText }
-      });
-      showToast("Новость добавлена.");
-      form.reset();
-      await loadBootstrap({ silent: true });
-    });
-    return;
-  }
-
-  if (formType === "admin-create-battle") {
-    await withPending(async () => {
-      const formData = new FormData(form);
-      const genre = String(formData.get("genre"));
-      const trackAId = Number(formData.get("trackAId"));
-      const trackBId = Number(formData.get("trackBId"));
-      const hours = Number(formData.get("hours"));
-      await api("/api/admin/battles/create", {
-        method: "POST",
-        body: { genre, trackAId, trackBId, hours }
-      });
-      showToast("Баттл создан.");
-      form.reset();
-      await loadBootstrap({ silent: true });
-    });
-    return;
-  }
-
   if (formType === "register") {
     await withPending(async () => {
       const data = new FormData(form);
@@ -2859,6 +2558,12 @@ function trimComment(value) {
     .slice(0, 280);
 }
 
+function trimSupportMessage(value) {
+  return String(value || "")
+    .trim()
+    .slice(0, 500);
+}
+
 document.addEventListener("input", (event) => {
   const target = event.target;
 
@@ -2888,26 +2593,10 @@ document.addEventListener("input", (event) => {
   }
 
   if (
-    target instanceof HTMLInputElement &&
-    target.dataset.action === "battle-seek"
+    target instanceof HTMLTextAreaElement &&
+    target.id === "support-message-input"
   ) {
-    const trackId = Number(target.dataset.trackId);
-    const audio = document.querySelector(`audio.battle-audio[data-track-id="${trackId}"]`);
-    if (!audio || !audio.duration) {
-      return;
-    }
-    audio.currentTime = (Number(target.value) / 100) * audio.duration;
-  }
-
-  if (
-    target instanceof HTMLInputElement &&
-    target.dataset.action === "battle-volume"
-  ) {
-    const volume = Number(target.value);
-    state.player.volume = Math.min(1, Math.max(0, volume));
-    document.querySelectorAll("audio.battle-audio").forEach((audio) => {
-      audio.volume = state.player.volume;
-    });
+    state.supportDraft = target.value.slice(0, 500);
   }
 });
 
@@ -2957,11 +2646,6 @@ document.addEventListener(
       return;
     }
 
-    document.querySelectorAll("button.battle-play-toggle").forEach((button) => {
-      const buttonTrackId = Number(button.dataset.trackId);
-      button.textContent = buttonTrackId === trackId ? "⏸" : "▶";
-    });
-
     const previousPlayAt = recentTrackPlays.get(trackId) || 0;
     const now = Date.now();
 
@@ -2975,127 +2659,8 @@ document.addEventListener(
   true,
 );
 
-function updateBattlePlayerProgress(audio) {
-  if (!(audio instanceof HTMLAudioElement)) {
-    return;
-  }
-
-  const trackId = audio.dataset.trackId;
-  const position = Number(audio.currentTime || 0);
-  const duration = Number(audio.duration || 0);
-
-  const seek = document.querySelector(`input.battle-seek[data-track-id="${trackId}"]`);
-  if (seek) {
-    seek.value = duration ? String(Math.round((position / duration) * 100)) : "0";
-  }
-  const currentTimeLabel = document.querySelector(
-    `span.battle-player-time[data-player-time="${trackId}"]`,
-  );
-  if (currentTimeLabel) {
-    currentTimeLabel.textContent = formatTime(position);
-  }
-  const durationLabel = document.querySelector(
-    `span.battle-player-duration[data-player-duration="${trackId}"]`,
-  );
-  if (durationLabel) {
-    durationLabel.textContent = formatTime(duration);
-  }
-}
-
-document.addEventListener(
-  "timeupdate",
-  (event) => {
-    const target = event.target;
-    if (!(target instanceof HTMLAudioElement)) {
-      return;
-    }
-    if (!target.classList.contains("battle-audio")) {
-      return;
-    }
-    updateBattlePlayerProgress(target);
-  },
-  true,
-);
-
-let searchOverlayTimeout = null;
-
-function openSearchOverlay() {
-  const overlay = document.getElementById('search-overlay');
-  const overlayInput = document.getElementById('search-overlay-input');
-  const resultsPanel = document.getElementById('search-results-panel');
-  if (!overlay || !overlayInput) return;
-  
-  overlay.classList.add('is-visible');
-  overlayInput.value = '';
-  resultsPanel.innerHTML = '';
-  setTimeout(() => overlayInput.focus(), 100);
-}
-
-function closeSearchOverlay() {
-  const overlay = document.getElementById('search-overlay');
-  if (!overlay) return;
-  overlay.classList.remove('is-visible');
-}
-
-async function performSearchOverlay(query) {
-  if (!query.trim()) {
-    document.getElementById('search-results-panel').innerHTML = '';
-    return;
-  }
-  
-  const data = await api('/api/search?q=' + encodeURIComponent(query));
-  const panel = document.getElementById('search-results-panel');
-  
-  if (!data.artists?.length && !data.tracks?.length) {
-    panel.innerHTML = '<div class="empty-state">Ничего не найдено</div>';
-    return;
-  }
-  
-  let html = '';
-  
-  if (data.artists?.length) {
-    html += '<div class="section-head"><h3>Артисты</h3></div>';
-    html += data.artists.slice(0, 5).map(a => `
-      <div class="list-item" data-action="open-artist" data-artist-id="${a.artist.id}">
-        <div class="list-art"><img src="${a.artist.avatarUrl || '/assets/avatar.svg'}" alt=""></div>
-        <div class="list-info">
-          <div class="list-name">${a.artist.name}</div>
-          <div class="list-meta">${a.artist.styles?.join(', ') || ''}</div>
-        </div>
-      </div>
-    `).join('');
-  }
-  
-  panel.innerHTML = html;
-}
-
-document.addEventListener('click', (e) => {
-  const searchInput = document.getElementById('search-input');
-  const overlay = document.getElementById('search-overlay');
-  const closeBtn = document.getElementById('search-close-btn');
-  
-  if (e.target === searchInput || e.target.closest('#topbar-search')) {
-    openSearchOverlay();
-  }
-  
-  if (e.target === closeBtn || (overlay && !overlay.contains(e.target) && e.target.id !== 'search-input')) {
-    closeSearchOverlay();
-  }
+loadBootstrap().catch((error) => {
+  state.loading = false;
+  render();
+  showToast(error.message, true);
 });
-
-document.addEventListener('input', (e) => {
-  if (e.target.id === 'search-overlay-input') {
-    clearTimeout(searchOverlayTimeout);
-    searchOverlayTimeout = setTimeout(() => {
-      performSearchOverlay(e.target.value);
-    }, 300);
-  }
-});
-
-document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') {
-    closeSearchOverlay();
-  }
-});
-
-start();

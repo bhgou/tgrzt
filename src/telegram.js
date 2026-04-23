@@ -51,33 +51,50 @@ export class TelegramBotService {
 
   async sendOpenAppMessage(chatId, firstName = '') {
     const hasPublicWebApp = this.config.appBaseUrl.startsWith('https://');
+    const greeting = firstName ? `Привет, ${firstName}! 👋` : 'Привет! 👋';
+
     const lines = [
-      `Demo Stage готов для загрузки демок и оценки треков${firstName ? `, ${firstName}` : ''}.`,
+      greeting,
       '',
-      'Что умеет приложение:',
-      '• лента свежих и рейтинговых треков',
-      '• поиск артистов',
-      '• личный кабинет и профиль',
-      '• загрузка WAV с прослушиванием в MP3',
-      '• лайки, комментарии и подписки',
+      '🎵 Demo Stage — платформа для музыкантов и любителей музыки.',
+      'Здесь артисты публикуют демки, а слушатели оценивают их и дают фидбек.',
+      '',
+      '— Что умеет приложение:',
+      '',
+      '🎧 Лента треков — свежие и топовые релизы прямо в ленте',
+      '🔍 Поиск артистов — находи и подписывайся на новых авторов',
+      '⬆️ Загрузка демок — WAV или MP3, сервер сам конвертирует',
+      '⭐ Рейтинги — оценки от 1 до 10 и честный топ лучших треков',
+      '💬 Комментарии — оставляй развёрнутый фидбек под треком',
+      '❤️ Избранное — сохраняй треки которые понравились',
+      '👥 Подписки — следи за артистами и их новыми релизами',
+      '🤝 Инвайты — приглашай друзей и получай бонусные прослушивания',
+      '📊 Еженедельный топ — итоги недели каждое воскресенье',
+      '',
+      `🌐 Сайт: ${this.config.appBaseUrl}/landing.html`,
     ];
 
     if (!hasPublicWebApp) {
       lines.push('');
-      lines.push('Mini App кнопка появится после того, как APP_BASE_URL будет заменён на публичный HTTPS-адрес.');
+      lines.push('ℹ️ Mini App кнопка появится после настройки публичного HTTPS-адреса.');
     }
 
     const replyMarkup = hasPublicWebApp
       ? {
-          keyboard: [
+          inline_keyboard: [
             [
               {
-                text: 'Открыть Demo Stage',
+                text: '🎵 Открыть Demo Stage',
                 web_app: { url: this.config.appBaseUrl },
               },
             ],
+            [
+              {
+                text: '🌐 Открыть сайт',
+                url: `${this.config.appBaseUrl}/landing.html`,
+              },
+            ],
           ],
-          resize_keyboard: true,
         }
       : undefined;
 

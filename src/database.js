@@ -36,7 +36,6 @@ db.exec(`
     wav_path TEXT NOT NULL,
     mp3_path TEXT NOT NULL,
     cover_path TEXT,
-    elo INTEGER NOT NULL DEFAULT 1200,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
   );
@@ -185,12 +184,11 @@ if (!userColumns.some((column) => column.name === 'role')) {
   db.exec(`ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'guest'`);
 }
 
-if (!userColumns.some((column) => column.name === 'critic_points')) {
-  db.exec(`ALTER TABLE users ADD COLUMN critic_points INTEGER NOT NULL DEFAULT 0`);
-}
-
-if (!userColumns.some((column) => column.name === 'is_banned')) {
-  db.exec(`ALTER TABLE users ADD COLUMN is_banned INTEGER NOT NULL DEFAULT 0`);
+{
+  const trackCols = db.prepare('PRAGMA table_info(tracks)').all();
+  if (!trackCols.some((c) => c.name === 'cover_path')) {
+    db.exec(`ALTER TABLE tracks ADD COLUMN cover_path TEXT`);
+  }
 }
 
 db.exec(`
@@ -278,8 +276,7 @@ function mapTrackRow(row, viewerId) {
     genre: row.genre,
     wavPath: row.wav_path,
     mp3Path: row.mp3_path,
-    coverPath: row.cover_path,
-    elo: Number(row.elo ?? 1200),
+    coverPath: row.cover_path ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     averageRating: Number(row.average_rating ?? 0),
@@ -411,7 +408,7 @@ function ensureNicknameUnique(userId, nickname) {
 
 function getTrackRecord(trackId) {
   const row = db
-    .prepare('SELECT id, owner_id, title, wav_path, mp3_path FROM tracks WHERE id = :trackId')
+    .prepare('SELECT id, owner_id, title, description, genre, wav_path, mp3_path, cover_path FROM tracks WHERE id = :trackId')
     .get({ trackId: Number(trackId) });
 
   if (!row) {
@@ -1028,7 +1025,7 @@ export function createTrack(userId, input) {
     genre,
     wavPath: input.wavPath,
     mp3Path: input.mp3Path,
-    coverPath: input.coverPath || null,
+    coverPath: input.coverPath ?? null,
     createdAt: nowIso(),
     updatedAt: nowIso(),
   });
@@ -1038,6 +1035,69 @@ export function createTrack(userId, input) {
     params: { trackId: Number(inserted.lastInsertRowid) },
     limit: 1,
   })[0];
+}
+
+export function updateTrack(actorUserId, trackId, input = {}) {
+  const actor = getUserById(actorUserId);
+  const track = getTrackRecord(trackId);
+
+  if (!actor) {
+    throw httpError(404, 'Пользователь не найден.');
+  }
+
+  const isOwner = Number(track.owner_id) === Number(actorUserId);
+  const canEdit = actor.isAdmin || isOwner;
+
+  if (!canEdit) {
+    throw httpError(403, 'Редактировать трек может только владелец.');
+  }
+
+  const oldCoverPath = track.cover_path ?? null;
+
+  // Title — обязательное поле при обновлении, если передано
+  let title = track.title;
+  if (input.title !== undefined) {
+    title = normalizeTrackField(input.title, 'Название трека', 2, 80);
+  }
+
+  const description =
+    input.description !== undefined ? trimText(input.description, 500) : track.description ?? '';
+  const genre = input.genre !== undefined ? trimText(input.genre, 40) : track.genre ?? '';
+
+  // coverPath: undefined = не трогаем; null = очистить; string = новый путь
+  const coverPath =
+    input.coverPath === undefined ? oldCoverPath : input.coverPath || null;
+
+  db.prepare(`
+    UPDATE tracks
+    SET
+      title = :title,
+      description = :description,
+      genre = :genre,
+      cover_path = :coverPath,
+      updated_at = :updatedAt
+    WHERE id = :trackId
+  `).run({
+    trackId: Number(trackId),
+    title,
+    description,
+    genre,
+    coverPath,
+    updatedAt: nowIso(),
+  });
+
+  const updated = selectTracks(actorUserId, {
+    whereClause: 't.id = :trackId',
+    params: { trackId: Number(trackId) },
+    limit: 1,
+  })[0];
+
+  // Возвращаем обновленный трек + старый coverPath (если он сменился — вызывающий удалит файл)
+  const coverChanged = oldCoverPath && oldCoverPath !== coverPath;
+  return {
+    track: updated,
+    oldCoverPath: coverChanged ? oldCoverPath : null,
+  };
 }
 
 export function toggleLike(userId, trackId) {
@@ -1239,6 +1299,7 @@ export function deleteTrack(actorUserId, trackId) {
     trackId: Number(track.id),
     wavPath: track.wav_path,
     mp3Path: track.mp3_path,
+    coverPath: track.cover_path ?? null,
     deletedAsAdmin: Boolean(actor.isAdmin && Number(track.owner_id) !== Number(actorUserId)),
   };
 }

@@ -50,21 +50,7 @@ export const config = {
   maxJsonBytes: 1_000_000,
   maxAudioBytes: 60 * 1024 * 1024,
   maxAvatarBytes: 5 * 1024 * 1024,
-  maxCoverBytes: 10 * 1024 * 1024,
-  genres: [
-    'Hip-Hop',
-    'Electronic',
-    'Pop',
-    'Rock',
-    'Indie',
-    'Phonk',
-    'R&B',
-    'Lo-Fi',
-    'Techno'
-  ],
-  defaultElo: 1200,
-  adminSecretToken: process.env.ADMIN_SECRET_TOKEN ?? '',
-  supportTelegramId: process.env.SUPPORT_TELEGRAM_ID ?? '',
+  maxCoverBytes: 5 * 1024 * 1024,
 };
 
 export function isAdminIdentity(identity) {
