@@ -15,6 +15,7 @@ import {
   getArtistProfile,
   getBootstrapData,
   getInviteStats,
+  getPlatformStats,
   getSupportMessages,
   getTopInviters,
   getUserById,
@@ -26,6 +27,7 @@ import {
   toggleFollow,
   toggleLike,
   updateProfile,
+  updateTrack,
   upsertRating,
   upsertTelegramUser,
 } from './database.js';
@@ -57,6 +59,7 @@ function mapTrackForClient(track) {
     ...track,
     wavUrl: toPublicMediaUrl(track.wavPath),
     mp3Url: toPublicMediaUrl(track.mp3Path),
+    coverUrl: track.coverPath ? toPublicMediaUrl(track.coverPath) : null,
     artist: {
       ...track.artist,
       avatarUrl: track.artist.avatarPath ? toPublicMediaUrl(track.artist.avatarPath) : null,
@@ -286,8 +289,9 @@ async function handleApiRequest(req, res, pathname, sessionUser) {
   }
 
   if (req.method === 'POST' && pathname === '/api/tracks') {
-    const formData = await readFormData(req, config.maxAudioBytes);
+    const formData = await readFormData(req, config.maxAudioBytes + config.maxCoverBytes);
     const audioFile = formData.get('track');
+    const coverFile = formData.get('cover');
 
     if (!(audioFile instanceof File) || audioFile.size === 0) {
       throw httpError(400, 'Нужно приложить аудиофайл (WAV или MP3).');
@@ -301,6 +305,7 @@ async function handleApiRequest(req, res, pathname, sessionUser) {
 
     let wavUpload = null;
     let mp3Upload = null;
+    let coverUpload = null;
 
     try {
       if (uploadExt === '.wav') {
@@ -321,12 +326,25 @@ async function handleApiRequest(req, res, pathname, sessionUser) {
         wavUpload = { relativePath: mp3Upload.relativePath, absolutePath: mp3Upload.absolutePath };
       }
 
+      // Обложка — опционально
+      if (coverFile instanceof File && coverFile.size > 0) {
+        const coverExt = path.extname(coverFile.name || '').toLowerCase();
+        if (!['.jpg', '.jpeg', '.png', '.webp'].includes(coverExt)) {
+          throw httpError(400, 'Обложка должна быть в формате JPG, PNG или WEBP.');
+        }
+        coverUpload = await saveUploadedFile(coverFile, 'covers', {
+          allowedExtensions: ['.jpg', '.jpeg', '.png', '.webp'],
+          maxBytes: config.maxCoverBytes,
+        });
+      }
+
       const track = createTrack(sessionUser.id, {
         title: trimText(formData.get('title'), 80),
         description: '',
         genre: '',
         wavPath: wavUpload.relativePath,
         mp3Path: mp3Upload.relativePath,
+        coverPath: coverUpload?.relativePath ?? null,
       });
 
       sendJson(res, 200, {
@@ -338,6 +356,7 @@ async function handleApiRequest(req, res, pathname, sessionUser) {
       const toDelete = new Set();
       if (wavUpload?.relativePath) toDelete.add(wavUpload.relativePath);
       if (mp3Upload?.relativePath) toDelete.add(mp3Upload.relativePath);
+      if (coverUpload?.relativePath) toDelete.add(coverUpload.relativePath);
       await Promise.all([...toDelete].map((p) => removeStoredFile(p).catch(() => {})));
 
       throw error;
@@ -346,12 +365,65 @@ async function handleApiRequest(req, res, pathname, sessionUser) {
     return;
   }
 
-  const deleteTrackMatch = pathname.match(/^\/api\/tracks\/(\d+)$/);
+  const trackIdMatch = pathname.match(/^\/api\/tracks\/(\d+)$/);
+
+  if (req.method === 'PATCH' && trackIdMatch) {
+    const trackId = trackIdMatch[1];
+    const formData = await readFormData(req, config.maxCoverBytes + config.maxJsonBytes);
+    const coverFile = formData.get('cover');
+    const removeCover = formData.get('removeCover') === '1';
+
+    let coverUpload = null;
+    const input = {};
+
+    if (formData.has('title')) input.title = trimText(formData.get('title'), 80);
+    if (formData.has('description')) input.description = trimText(formData.get('description'), 500);
+    if (formData.has('genre')) input.genre = trimText(formData.get('genre'), 40);
+
+    try {
+      if (coverFile instanceof File && coverFile.size > 0) {
+        const coverExt = path.extname(coverFile.name || '').toLowerCase();
+        if (!['.jpg', '.jpeg', '.png', '.webp'].includes(coverExt)) {
+          throw httpError(400, 'Обложка должна быть в формате JPG, PNG или WEBP.');
+        }
+        coverUpload = await saveUploadedFile(coverFile, 'covers', {
+          allowedExtensions: ['.jpg', '.jpeg', '.png', '.webp'],
+          maxBytes: config.maxCoverBytes,
+        });
+        input.coverPath = coverUpload.relativePath;
+      } else if (removeCover) {
+        input.coverPath = null;
+      }
+
+      const result = updateTrack(sessionUser.id, trackId, input);
+
+      // Удаляем старый файл обложки, если он сменился или был снят
+      if (result.oldCoverPath) {
+        await removeStoredFile(result.oldCoverPath).catch(() => {});
+      }
+
+      sendJson(res, 200, {
+        ok: true,
+        track: mapTrackForClient(result.track),
+      });
+    } catch (error) {
+      // Если не сохранили в БД — удалим загруженный новый файл обложки
+      if (coverUpload?.relativePath) {
+        await removeStoredFile(coverUpload.relativePath).catch(() => {});
+      }
+      throw error;
+    }
+
+    return;
+  }
+
+  const deleteTrackMatch = trackIdMatch;
 
   if (req.method === 'DELETE' && deleteTrackMatch) {
     const deleted = deleteTrack(sessionUser.id, deleteTrackMatch[1]);
     await removeStoredFile(deleted.wavPath).catch(() => {});
     await removeStoredFile(deleted.mp3Path).catch(() => {});
+    if (deleted.coverPath) await removeStoredFile(deleted.coverPath).catch(() => {});
 
     sendJson(res, 200, {
       ok: true,
@@ -525,6 +597,12 @@ const server = createServer((req, res) => {
 
       if (req.method === 'GET' && url.pathname === '/health') {
         sendText(res, 200, 'ok');
+        return;
+      }
+
+      // ── Public endpoints (no auth required) ──────────────────────────────
+      if (req.method === 'GET' && url.pathname === '/api/public-stats') {
+        sendJson(res, 200, getPlatformStats());
         return;
       }
 

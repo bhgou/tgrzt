@@ -36,6 +36,7 @@ const state = {
   },
   activeTrack: null,
   activeTrackPending: false,
+  isEditingTrack: false,
 };
 
 // Extract invite code from Telegram start_param or URL ?invite=
@@ -104,6 +105,33 @@ function formatDateTime(dateString) {
     hour: "2-digit",
     minute: "2-digit",
   }).format(new Date(dateString));
+}
+
+function formatTime(seconds) {
+  if (!isFinite(seconds) || seconds < 0) return "0:00";
+  const m = Math.floor(seconds / 60);
+  const s = Math.floor(seconds % 60);
+  return `${m}:${s.toString().padStart(2, "0")}`;
+}
+
+function renderAudioPlayer(src, trackId, options = {}) {
+  const preload = options.preload ?? "none";
+  return `
+    <div class="audio-player">
+      <audio src="${escapeHtml(src)}" data-track-id="${trackId}" preload="${preload}"></audio>
+      <button class="ap-play-btn" type="button" data-ap="play-pause" aria-label="Воспроизвести">▶</button>
+      <span class="ap-time ap-time-cur">0:00</span>
+      <div class="ap-progress" data-ap="seek">
+        <div class="ap-progress-fill"></div>
+        <div class="ap-progress-dot"></div>
+      </div>
+      <span class="ap-time ap-time-dur">–:––</span>
+      <div class="ap-vol-wrap">
+        <button class="ap-vol-btn" type="button" data-ap="mute" aria-label="Громкость">🔊</button>
+        <input class="ap-vol-range" type="range" min="0" max="100" value="100" data-ap="volume" aria-label="Громкость" />
+      </div>
+    </div>
+  `;
 }
 
 function formatRating(value) {
@@ -490,6 +518,11 @@ function renderTrackCard(track) {
 
   return `
     <article class="track-card">
+      ${
+        track.coverUrl
+          ? `<div class="track-cover" style="background-image:url('${escapeHtml(track.coverUrl)}')"></div>`
+          : ""
+      }
       <div class="track-head">
         <div>
           <p class="eyebrow">${formatDate(track.createdAt) || "Свежий релиз"}</p>
@@ -531,7 +564,7 @@ function renderTrackCard(track) {
 
       <p class="track-description">${escapeHtml(track.description || "Автор ждёт честный фидбек по демке.")}</p>
 
-      <audio controls src="${track.mp3Url}" data-track-id="${track.id}"></audio>
+      ${renderAudioPlayer(track.mp3Url, track.id)}
 
       <div class="stats-row">
         <span class="pill">${formatFollowers(track.playsCount)} прослушиваний</span>
@@ -706,6 +739,7 @@ async function openTrackModal(trackId) {
 
 function closeTrackModal() {
   state.activeTrack = null;
+  state.isEditingTrack = false;
   renderTrackModal();
 }
 
@@ -727,116 +761,211 @@ function renderTrackModal() {
 
   document.body.classList.add("track-modal-locked");
 
-  const myRating = Number(track.myRating || 0);
-  const canRate = !track.isOwnTrack && state.me?.isRegistered;
-  const canLike = !track.isOwnTrack && state.me?.isRegistered;
-  const canComment = state.me?.isRegistered;
   const canDelete = Boolean(state.me?.isAdmin || track.isOwnTrack);
+  const canEdit = Boolean(track.isOwnTrack);
 
-  const ratingButtons = Array.from({ length: 10 }, (_, i) => {
-    const score = i + 1;
-    const active = myRating === score;
-    return `
-      <button
-        type="button"
-        class="rate-btn ${active ? "is-active" : ""}"
-        data-action="rate-track-modal"
-        data-track-id="${track.id}"
-        data-score="${score}"
-        ${canRate ? "" : "disabled"}
-      >${score}</button>
+  // ── Режим редактирования ──────────────────────────────────────────
+  if (state.isEditingTrack && canEdit) {
+    const currentCoverUrl = track.coverUrl || null;
+    elements.trackModal.innerHTML = `
+      <div class="track-modal-head">
+        <div>
+          <p class="eyebrow">Редактирование</p>
+          <h3>${escapeHtml(track.title)}</h3>
+        </div>
+        <button class="support-close" type="button" data-action="track-edit-cancel" aria-label="Отмена">✕</button>
+      </div>
+
+      <form class="form-grid track-edit-form" data-form="edit-track" data-track-id="${track.id}">
+
+        <label class="upload-zone cover-zone" id="cover-zone-edit">
+          <div class="cover-zone-preview" id="cover-zone-preview-edit" style="${currentCoverUrl ? `background-image:url('${escapeHtml(currentCoverUrl)}')` : ""}">
+            ${currentCoverUrl ? "" : "🎨"}
+          </div>
+          <strong>Обложка трека</strong>
+          <span class="muted">JPG, PNG или WEBP · до 5 МБ. Оставь пустым — не изменится.</span>
+          <input name="cover" type="file" accept="image/jpeg,image/png,image/webp" id="cover-input-edit" />
+        </label>
+
+        ${
+          currentCoverUrl
+            ? `<button type="button" class="btn-ghost track-edit-remove-cover" data-action="track-edit-remove-cover">🗑 Убрать обложку</button>`
+            : ""
+        }
+
+        <div class="field">
+          <label>Название трека</label>
+          <input name="title" value="${escapeHtml(track.title)}" maxlength="80" required />
+        </div>
+
+        <div class="field">
+          <label>Описание <span class="muted">(необязательно)</span></label>
+          <textarea name="description" maxlength="500" rows="3">${escapeHtml(track.description || "")}</textarea>
+        </div>
+
+        <input type="hidden" name="removeCover" value="0" id="remove-cover-flag" />
+
+        <div class="cta-row">
+          <button class="btn" type="submit">Сохранить</button>
+          <button class="btn-ghost" type="button" data-action="track-edit-cancel">Отмена</button>
+        </div>
+      </form>
     `;
-  }).join("");
+
+    // Превью обложки при выборе нового файла
+    const coverInput = document.getElementById("cover-input-edit");
+    if (coverInput) {
+      coverInput.addEventListener("change", () => {
+        const file = coverInput.files?.[0];
+        const preview = document.getElementById("cover-zone-preview-edit");
+        if (!preview) return;
+        if (!file) return;
+        if (file.size > 5 * 1024 * 1024) {
+          showToast("Обложка больше 5 МБ — выбери файл поменьше.", true);
+          coverInput.value = "";
+          return;
+        }
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          preview.style.backgroundImage = `url(${e.target.result})`;
+          preview.textContent = "";
+          // Раз выбрали новый файл — отменяем removeCover
+          const flag = document.getElementById("remove-cover-flag");
+          if (flag) flag.value = "0";
+        };
+        reader.readAsDataURL(file);
+      });
+    }
+    return;
+  }
+
+  // ── Режим просмотра ───────────────────────────────────────────────
+  const myRating = Number(track.myRating || 0);
+  const canRate    = !track.isOwnTrack && state.me?.isRegistered;
+  const canLike    = !track.isOwnTrack && state.me?.isRegistered;
+  const canComment = state.me?.isRegistered;
+
+  const sliderVal = myRating || 5;
+  const ratingSlider = `
+    <div class="rate-slider-wrap">
+      <div class="rate-slider-top">
+        <span class="rate-slider-score" id="rss-${track.id}">${sliderVal}</span>
+        <span class="rate-slider-suffix">/ 10</span>
+        ${myRating ? `<span class="rate-slider-saved">✓ сохранено</span>` : ""}
+      </div>
+      <input class="rate-slider" type="range"
+        min="1" max="10" step="1"
+        value="${sliderVal}"
+        data-track-id="${track.id}"
+        data-rate-slider="1"
+        ${canRate ? "" : "disabled"}>
+      <div class="rate-slider-labels">
+        <span>1</span><span>2</span><span>3</span><span>4</span><span>5</span>
+        <span>6</span><span>7</span><span>8</span><span>9</span><span>10</span>
+      </div>
+      ${canRate ? `
+        <button class="btn rate-slider-submit"
+          data-action="rate-track-modal"
+          data-track-id="${track.id}">
+          ${myRating ? "Изменить оценку" : "Оценить"}
+        </button>` : ""}
+    </div>
+  `;
 
   const comments = (track.comments || []).slice(0, 30);
+  const artistName = escapeHtml(track.artist.nickname || track.artist.username || "artist");
+  const heroBg = track.coverUrl
+    ? `url('${escapeHtml(track.coverUrl)}')`
+    : coverGradient(track.id);
+  const isCoverImg = Boolean(track.coverUrl);
 
   elements.trackModal.innerHTML = `
-    <div class="track-modal-head">
-      <div>
-        <p class="eyebrow">Трек</p>
-        <h3>${escapeHtml(track.title)}</h3>
-        <span class="muted">@${escapeHtml(track.artist.nickname || track.artist.username || "artist")} · ${escapeHtml(track.genre || "Релиз")}</span>
-      </div>
-      <button class="support-close" type="button" data-action="track-modal-close" aria-label="Закрыть">✕</button>
-    </div>
 
-    <div class="track-modal-stats">
-      <div class="modal-stat">
-        <strong>${formatFollowers(track.playsCount)}</strong>
-        <span class="muted">прослушиваний</span>
-      </div>
-      <div class="modal-stat">
-        <strong>${formatRating(track.averageRating)} / 10</strong>
-        <span class="muted">оценка</span>
-      </div>
-      <div class="modal-stat">
-        <strong>${formatFollowers(track.likesCount)}</strong>
-        <span class="muted">лайков</span>
+    <!-- ── Hero ── -->
+    <div class="tm-hero ${isCoverImg ? "tm-hero--photo" : "tm-hero--gradient"}" style="${isCoverImg ? `background-image:${heroBg}` : `background:${heroBg}`}">
+      <button class="tm-close-btn" type="button" data-action="track-modal-close" aria-label="Закрыть">✕</button>
+      <div class="tm-hero-overlay">
+        <span class="tm-genre-pill">${escapeHtml(track.genre || "Demo tape")}</span>
+        <h2 class="tm-title">${escapeHtml(track.title)}</h2>
+        <div class="tm-artist-row">
+          ${renderAvatar(track.artist, "avatar avatar-xs")}
+          <span class="tm-artist-name">@${artistName}</span>
+          <span class="tm-rating-badge">⭐ ${formatRating(track.averageRating)}</span>
+        </div>
       </div>
     </div>
 
-    <audio
-      class="track-modal-audio"
-      controls
-      controlsList="nodownload noplaybackrate noremoteplayback"
-      disablepictureinpicture
-      src="${track.mp3Url}"
-      data-track-id="${track.id}"
-    ></audio>
+    <!-- ── Статистика ── -->
+    <div class="tm-stats-row">
+      <div class="tm-stat">
+        <span class="tm-stat-icon">🎧</span>
+        <span class="tm-stat-val">${formatFollowers(track.playsCount)}</span>
+        <span class="tm-stat-lbl">прослушиваний</span>
+      </div>
+      <div class="tm-stat-sep"></div>
+      <div class="tm-stat">
+        <span class="tm-stat-icon">⭐</span>
+        <span class="tm-stat-val">${formatRating(track.averageRating)} / 10</span>
+        <span class="tm-stat-lbl">оценка (${track.ratingsCount})</span>
+      </div>
+      <div class="tm-stat-sep"></div>
+      <div class="tm-stat">
+        <span class="tm-stat-icon">❤️</span>
+        <span class="tm-stat-val">${formatFollowers(track.likesCount)}</span>
+        <span class="tm-stat-lbl">лайков</span>
+      </div>
+    </div>
 
-    <div class="track-modal-actions">
-      <button
-        class="btn ${track.isLiked ? "btn-secondary" : ""}"
-        data-action="toggle-like"
-        data-track-id="${track.id}"
-        ${canLike ? "" : "disabled"}
-      >
-        ${track.isLiked ? "♥ Лайкнуто" : "♡ Лайк"}
+    <!-- ── Плеер ── -->
+    <div class="tm-player-wrap">
+      ${renderAudioPlayer(track.mp3Url, track.id, { preload: "metadata" })}
+    </div>
+
+    <!-- ── Действия ── -->
+    <div class="tm-actions">
+      <button class="tm-action-btn ${track.isLiked ? "tm-action-btn--active" : ""}"
+        data-action="toggle-like" data-track-id="${track.id}"
+        ${canLike ? "" : "disabled"}>
+        <span class="tm-action-icon">${track.isLiked ? "♥" : "♡"}</span>
+        <span>${track.isLiked ? "Лайкнуто" : "Лайк"}</span>
       </button>
-      ${
-        canDelete
-          ? `<button class="btn-danger" data-action="delete-track" data-track-id="${track.id}">Удалить</button>`
-          : ""
-      }
+      ${canEdit ? `
+        <button class="tm-action-btn" data-action="track-edit-open" data-track-id="${track.id}">
+          <span class="tm-action-icon">✏️</span><span>Изменить</span>
+        </button>` : ""}
+      ${canDelete ? `
+        <button class="tm-action-btn tm-action-btn--danger" data-action="delete-track" data-track-id="${track.id}">
+          <span class="tm-action-icon">🗑</span><span>Удалить</span>
+        </button>` : ""}
     </div>
 
-    <div class="track-modal-section">
-      <p class="eyebrow">Оценка трека</p>
-      ${
-        canRate
-          ? `<p class="muted">Поставь оценку от 1 до 10. Можно поменять в любой момент.</p>`
-          : `<p class="muted">${track.isOwnTrack ? "Свой трек оценивать нельзя." : "Зайди под своим аккаунтом, чтобы оценить."}</p>`
-      }
-      <div class="rate-row">
-        ${ratingButtons}
-      </div>
+    <!-- ── Оценка ── -->
+    <div class="tm-section">
+      <p class="tm-section-title">Поставь оценку</p>
+      ${!canRate ? `<p class="muted tm-hint">${track.isOwnTrack ? "Свой трек оценивать нельзя." : "Войди, чтобы оценить."}</p>` : ""}
+      ${ratingSlider}
     </div>
 
-    <div class="track-modal-section">
-      <p class="eyebrow">Комментарии</p>
+    <!-- ── Комментарии ── -->
+    <div class="tm-section">
+      <p class="tm-section-title">Комментарии <span class="tm-count">${track.commentsCount}</span></p>
       ${
-        canComment
-          ? `
-            <form class="comment-form" data-form="comment-modal" data-track-id="${track.id}">
-              <textarea name="body" maxlength="500" placeholder="Что думаешь о треке?"></textarea>
-              <button class="btn" type="submit">Отправить</button>
-            </form>
-          `
-          : `<p class="muted">Зайди под своим аккаунтом, чтобы оставить комментарий.</p>`
+        canComment ? `
+          <form class="tm-comment-form" data-form="comment-modal" data-track-id="${track.id}">
+            <textarea name="body" maxlength="500" placeholder="Что думаешь о треке?"></textarea>
+            <button class="btn" type="submit">→</button>
+          </form>
+        ` : `<p class="muted tm-hint">Войди, чтобы оставить комментарий.</p>`
       }
       <div class="comment-list">
         ${
           comments.length
-            ? comments
-                .map(
-                  (c) => `
-                    <div class="comment-item">
-                      <strong>${escapeHtml(c.user?.nickname || c.user?.firstName || "Слушатель")}</strong>
-                      <span>${escapeHtml(c.body)}</span>
-                    </div>
-                  `,
-                )
-                .join("")
+            ? comments.map((c) => `
+                <div class="comment-item">
+                  <strong>${escapeHtml(c.user?.nickname || c.user?.firstName || "Слушатель")}</strong>
+                  <span>${escapeHtml(c.body)}</span>
+                </div>
+              `).join("")
             : `<div class="empty-state"><span class="muted">Пока нет комментариев — будь первым.</span></div>`
         }
       </div>
@@ -872,6 +1001,7 @@ function renderCompactTrackCard(track, options = {}) {
     return `
       <article class="compact-track-card compact-track-card--simple">
         <button class="compact-track-meta" type="button" data-action="open-track" data-track-id="${track.id}">
+          <span class="compact-track-cover${track.coverUrl ? "" : " compact-track-cover--empty"}" ${track.coverUrl ? `style="background-image:url('${escapeHtml(track.coverUrl)}')"` : ""}>${track.coverUrl ? "" : "🎵"}</span>
           <span class="meta-col">
             <strong>${escapeHtml(track.title)}</strong>
             ${
@@ -882,14 +1012,7 @@ function renderCompactTrackCard(track, options = {}) {
           </span>
           <span class="compact-track-open-hint" aria-hidden="true">Открыть →</span>
         </button>
-        <audio
-          controls
-          controlsList="nodownload noplaybackrate noremoteplayback"
-          disablepictureinpicture
-          preload="none"
-          src="${track.mp3Url}"
-          data-track-id="${track.id}"
-        ></audio>
+        ${renderAudioPlayer(track.mp3Url, track.id)}
       </article>
     `;
   }
@@ -913,13 +1036,7 @@ function renderCompactTrackCard(track, options = {}) {
           <span class="pill">${formatFollowers(track.likesCount)} лайков</span>
           <span class="pill">${formatFollowers(track.commentsCount)} комм.</span>
         </div>
-        <audio
-          controls
-          controlsList="nodownload noplaybackrate noremoteplayback"
-          disablepictureinpicture
-          src="${track.mp3Url}"
-          data-track-id="${track.id}"
-        ></audio>
+        ${renderAudioPlayer(track.mp3Url, track.id)}
         ${
           canLike || canDeleteTrack
             ? `
@@ -1189,6 +1306,11 @@ const NEWS_ITEMS = [
     title: "Итог недели в канале",
     body: "Каждое воскресенье 18:00 UTC — топ-3 треков и выбор редакции.",
   },
+  {
+    icon: "⚔️",
+    title: "Батлы треков",
+    body: "Два трека — одно голосование. Победитель получает буст в ленте.",
+  },
 ];
 
 function renderNewsSection() {
@@ -1217,22 +1339,48 @@ function renderNewsSection() {
   `;
 }
 
+function renderLatestTrackCard(track) {
+  const coverStyle = track.coverUrl
+    ? `background-image:url('${escapeHtml(track.coverUrl)}')`
+    : `background:${coverGradient(track.id)}`;
+  return `
+    <article class="latest-track-card" data-action="open-track" data-track-id="${track.id}" role="button" tabindex="0">
+      <div class="latest-cover" style="${coverStyle}">
+        <span class="latest-plays-badge">🎧 ${formatFollowers(track.playsCount)}</span>
+      </div>
+      <div class="latest-info">
+        <strong class="latest-title">${escapeHtml(track.title)}</strong>
+        <span class="latest-artist muted">${escapeHtml(track.artist.nickname || track.artist.username || "artist")}</span>
+      </div>
+    </article>
+  `;
+}
+
+function renderLatestTracksSection(tracks) {
+  if (!tracks.length) return "";
+  return `
+    <section class="panel latest-section">
+      <div class="section-head section-head--compact">
+        <div>
+          <p class="eyebrow">Fresh drops</p>
+          <h3>Новинки</h3>
+        </div>
+      </div>
+      <div class="latest-grid">
+        ${tracks.map(renderLatestTrackCard).join("")}
+      </div>
+    </section>
+  `;
+}
+
 function renderHomeView() {
   const topArtists = state.topArtists.slice(0, 5);
   const popularArtists = state.topArtists.slice(5);
-  const latestSection = state.latestTracks.length
-    ? renderCompactTracksSection(
-        "Недавние релизы",
-        state.latestTracks,
-        "Пока нет свежих треков",
-        { showArtist: true, simple: true },
-      )
-    : "";
 
   return `
     ${renderNewsSection()}
     ${renderTopArtistsSection(topArtists)}
-    ${latestSection}
+    ${renderLatestTracksSection(state.latestTracks)}
     ${renderArtistRowsSection(popularArtists)}
   `;
 }
@@ -1309,6 +1457,13 @@ function renderUploadView() {
           <input name="title" placeholder="Например: Night Demo 01" maxlength="80" required />
         </div>
 
+        <label class="upload-zone cover-zone" id="cover-zone">
+          <div class="cover-zone-preview" id="cover-zone-preview">🎨</div>
+          <strong>Обложка трека</strong>
+          <span class="muted">JPG, PNG или WEBP. До 5 МБ. Необязательно — если не выберешь, останется градиент.</span>
+          <input name="cover" type="file" accept="image/jpeg,image/png,image/webp" id="cover-input" />
+        </label>
+
         <div class="upload-zone">
           <strong>Выбери аудиофайл</strong>
           <span class="muted">WAV или MP3 — сервер сам подготовит версию для прослушивания.</span>
@@ -1383,7 +1538,7 @@ function renderArtistProfileView() {
       `${tracksCount} ${tracksLabel}`,
       tracksArr,
       "У этого артиста пока нет опубликованных релизов",
-      { showArtist: false, simple: true }
+      { showArtist: false, simple: true },
     )}
   `;
 }
@@ -1413,6 +1568,57 @@ function renderRegisterForm(selectedRole = "artist") {
         <button class="btn-ghost" type="button" data-action="hide-register">Скрыть форму</button>
       </div>
     </form>
+  `;
+}
+
+function renderMyTrackManageCard(track) {
+  const coverStyle = track.coverUrl
+    ? `background-image:url('${escapeHtml(track.coverUrl)}')`
+    : "";
+  const coverClass = track.coverUrl ? "my-track-cover" : "my-track-cover my-track-cover--empty";
+
+  return `
+    <article class="my-track-card">
+      <button class="my-track-cover-btn" type="button" data-action="open-track" data-track-id="${track.id}">
+        <span class="${coverClass}" style="${coverStyle}">${track.coverUrl ? "" : "🎵"}</span>
+      </button>
+      <div class="my-track-info">
+        <strong class="my-track-title">${escapeHtml(track.title)}</strong>
+        <div class="my-track-meta">
+          <span class="pill">${formatRating(track.averageRating)} / 10</span>
+          <span class="pill">${formatFollowers(track.playsCount)} прослушиваний</span>
+        </div>
+      </div>
+      <div class="my-track-actions">
+        <button class="btn-ghost my-track-edit-btn" data-action="manage-track-edit" data-track-id="${track.id}" title="Редактировать">✏️</button>
+        <button class="btn-ghost my-track-delete-btn" data-action="delete-track" data-track-id="${track.id}" title="Удалить">🗑</button>
+      </div>
+    </article>
+  `;
+}
+
+function renderMyTracksPanel() {
+  const tracks = state.me?.ownTracks || [];
+  return `
+    <section class="my-tracks-panel">
+      <div class="section-head section-head--compact">
+        <div>
+          <p class="eyebrow">My releases</p>
+          <h3>Мои треки</h3>
+        </div>
+        <button class="btn" data-action="jump-view" data-view="upload">+ Загрузить</button>
+      </div>
+      ${
+        tracks.length
+          ? `<div class="my-track-list">${tracks.map(renderMyTrackManageCard).join("")}</div>`
+          : `
+            <div class="empty-state">
+              <strong>Ты ещё не загрузил ни одного трека</strong>
+              <span class="muted">Нажми «Загрузить» и залей первую демку — она сразу попадёт в ленту.</span>
+            </div>
+          `
+      }
+    </section>
   `;
 }
 
@@ -1475,18 +1681,9 @@ function renderProfileView() {
 
     ${state.me.isAdmin ? renderAdminPanel() : ""}
 
-    ${
-      isArtist(state.me)
-        ? renderCompactTracksSection(
-            "Релизы",
-            state.me.ownTracks,
-            "Ты ещё не загрузил ни одного релиза",
-            { showArtist: false },
-          )
-        : ""
-    }
+    ${isArtist(state.me) ? renderMyTracksPanel() : ""}
 
-    ${renderCompactTracksSection("Лайкнутые треки", state.me.likedTracks, "Ты пока не лайкнул ни одного трека", { showArtist: true })}
+    ${renderCompactTracksSection("Лайкнутые треки", state.me.likedTracks, "Ты пока не лайкнул ни одного трека", { showArtist: true, simple: true })}
   `;
 }
 
@@ -1667,11 +1864,21 @@ function renderTopbar() {
 
   let title = "";
   switch (state.activeView) {
-    case "home":    title = "Главная"; break;
-    case "search":  title = "Поиск"; break;
-    case "upload":  title = "Загрузка"; break;
-    case "liked":   title = "Избранное"; break;
-    case "profile": title = "Личный кабинет"; break;
+    case "home":
+      title = "Главная";
+      break;
+    case "search":
+      title = "Поиск";
+      break;
+    case "upload":
+      title = "Загрузка";
+      break;
+    case "liked":
+      title = "Избранное";
+      break;
+    case "profile":
+      title = "Личный кабинет";
+      break;
     case "artist": {
       const a = state.selectedArtist?.artist;
       title = a
@@ -1679,7 +1886,8 @@ function renderTopbar() {
         : "Профиль артиста";
       break;
     }
-    default: title = "";
+    default:
+      title = "";
   }
   titleEl.textContent = title;
 }
@@ -1767,12 +1975,101 @@ async function refreshAfterMutation(message) {
   }
 }
 
+// ── Кастомный аудио-плеер ────────────────────────────────
+function apGetAudio(el) {
+  return el.closest(".audio-player")?.querySelector("audio") ?? null;
+}
+
+function apUpdateProgress(audio) {
+  const player = audio.closest(".audio-player");
+  if (!player) return;
+  const pct = audio.duration ? (audio.currentTime / audio.duration) * 100 : 0;
+  const fill = player.querySelector(".ap-progress-fill");
+  const dot  = player.querySelector(".ap-progress-dot");
+  const cur  = player.querySelector(".ap-time-cur");
+  const dur  = player.querySelector(".ap-time-dur");
+  if (fill) fill.style.width = pct + "%";
+  if (dot)  dot.style.left  = pct + "%";
+  if (cur)  cur.textContent = formatTime(audio.currentTime);
+  if (dur && isFinite(audio.duration)) dur.textContent = formatTime(audio.duration);
+}
+
+function apUpdatePlayBtn(audio) {
+  const player = audio.closest(".audio-player");
+  if (!player) return;
+  const btn = player.querySelector(".ap-play-btn");
+  if (btn) btn.textContent = audio.paused ? "▶" : "⏸";
+  player.classList.toggle("is-playing", !audio.paused);
+}
+
+function apUpdateVolBtn(audio) {
+  const player = audio.closest(".audio-player");
+  if (!player) return;
+  const btn = player.querySelector(".ap-vol-btn");
+  if (!btn) return;
+  btn.textContent = audio.muted || audio.volume === 0 ? "🔇" : audio.volume < 0.5 ? "🔉" : "🔊";
+}
+
+// Обновляем UI при playback events (capture — media events не баблятся)
+["play", "pause", "ended"].forEach((evName) => {
+  document.addEventListener(evName, (e) => {
+    if (e.target instanceof HTMLAudioElement) apUpdatePlayBtn(e.target);
+  }, true);
+});
+document.addEventListener("timeupdate", (e) => {
+  if (e.target instanceof HTMLAudioElement) apUpdateProgress(e.target);
+}, true);
+document.addEventListener("loadedmetadata", (e) => {
+  if (e.target instanceof HTMLAudioElement) {
+    apUpdateProgress(e.target);
+    apUpdatePlayBtn(e.target);
+  }
+}, true);
+
 document.addEventListener("click", async (event) => {
   const navButton = event.target.closest("[data-view]");
 
   if (navButton && navButton.classList.contains("nav-btn")) {
     state.activeView = navButton.dataset.view;
     render();
+    return;
+  }
+
+  // Плеер: play/pause
+  if (event.target.closest("[data-ap='play-pause']")) {
+    const audio = apGetAudio(event.target.closest("[data-ap='play-pause']"));
+    if (audio) {
+      if (audio.paused) {
+        document.querySelectorAll("audio").forEach((a) => { if (a !== audio) { a.pause(); } });
+        audio.play().catch(() => {});
+      } else {
+        audio.pause();
+      }
+    }
+    return;
+  }
+
+  // Плеер: seek (клик по прогресс-бару)
+  const seekBar = event.target.closest("[data-ap='seek']");
+  if (seekBar) {
+    const audio = apGetAudio(seekBar);
+    if (audio && isFinite(audio.duration) && audio.duration > 0) {
+      const rect = seekBar.getBoundingClientRect();
+      const pct = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
+      audio.currentTime = pct * audio.duration;
+    }
+    return;
+  }
+
+  // Плеер: mute
+  if (event.target.closest("[data-ap='mute']")) {
+    const audio = apGetAudio(event.target.closest("[data-ap='mute']"));
+    if (audio) {
+      audio.muted = !audio.muted;
+      apUpdateVolBtn(audio);
+      const range = audio.closest(".audio-player")?.querySelector(".ap-vol-range");
+      if (range) range.value = audio.muted ? 0 : audio.volume * 100;
+    }
     return;
   }
 
@@ -1832,7 +2129,43 @@ document.addEventListener("click", async (event) => {
   }
 
   if (action === "track-modal-close") {
+    state.isEditingTrack = false;
     closeTrackModal();
+    return;
+  }
+
+  if (action === "track-edit-open") {
+    state.isEditingTrack = true;
+    renderTrackModal();
+    return;
+  }
+
+  if (action === "manage-track-edit") {
+    const trackId = actionTarget.dataset.trackId;
+    const track = findTrackInState(trackId);
+    if (!track) { showToast("Трек не найден.", true); return; }
+    state.activeTrack = track;
+    state.isEditingTrack = true;
+    renderTrackModal();
+    return;
+  }
+
+  if (action === "track-edit-cancel") {
+    state.isEditingTrack = false;
+    renderTrackModal();
+    return;
+  }
+
+  if (action === "track-edit-remove-cover") {
+    const preview = document.getElementById("cover-zone-preview-edit");
+    const flag = document.getElementById("remove-cover-flag");
+    const coverInput = document.getElementById("cover-input-edit");
+    if (preview) {
+      preview.style.backgroundImage = "";
+      preview.textContent = "🎨";
+    }
+    if (flag) flag.value = "1";
+    if (coverInput) coverInput.value = "";
     return;
   }
 
@@ -1875,7 +2208,9 @@ document.addEventListener("click", async (event) => {
 
   if (action === "toggle-like") {
     const trackId = actionTarget.dataset.trackId;
-    const modalTrackId = state.activeTrack ? Number(state.activeTrack.id) : null;
+    const modalTrackId = state.activeTrack
+      ? Number(state.activeTrack.id)
+      : null;
     await withPending(async () => {
       await api(`/api/tracks/${trackId}/like`, { method: "POST" });
       await refreshAfterMutation("Лайк обновлён.");
@@ -1936,7 +2271,10 @@ document.addEventListener("click", async (event) => {
 
     await withPending(async () => {
       await api(`/api/tracks/${trackId}`, { method: "DELETE" });
-      if (state.activeTrack && Number(state.activeTrack.id) === Number(trackId)) {
+      if (
+        state.activeTrack &&
+        Number(state.activeTrack.id) === Number(trackId)
+      ) {
         closeTrackModal();
       }
       await refreshAfterMutation("Трек удалён.");
@@ -1946,7 +2284,9 @@ document.addEventListener("click", async (event) => {
 
   if (action === "rate-track-modal") {
     const trackId = actionTarget.dataset.trackId;
-    const score = Number(actionTarget.dataset.score);
+    const slider = document.querySelector(`[data-rate-slider][data-track-id="${trackId}"]`);
+    const score = Number(slider?.value || 0);
+    if (!score) return;
     await withPending(async () => {
       await api(`/api/tracks/${trackId}/rate`, {
         method: "POST",
@@ -2099,6 +2439,33 @@ document.addEventListener("submit", async (event) => {
     return;
   }
 
+  if (formType === "edit-track") {
+    const trackId = form.dataset.trackId;
+    await withPending(async () => {
+      const data = new FormData(form);
+      const result = await api(`/api/tracks/${trackId}`, {
+        method: "PATCH",
+        body: data,
+      });
+      // Обновляем трек в state и закрываем форму редактирования
+      state.isEditingTrack = false;
+      state.activeTrack = result.track;
+      // Обновляем трек в списках чтобы отразить изменения
+      const updateInList = (arr) =>
+        arr.map((t) => (Number(t.id) === Number(trackId) ? result.track : t));
+      state.featuredTracks = updateInList(state.featuredTracks);
+      state.latestTracks = updateInList(state.latestTracks);
+      if (state.me?.ownTracks) state.me.ownTracks = updateInList(state.me.ownTracks);
+      if (state.me?.likedTracks) state.me.likedTracks = updateInList(state.me.likedTracks);
+      if (state.selectedArtist?.tracks) {
+        state.selectedArtist.tracks = updateInList(state.selectedArtist.tracks);
+      }
+      renderTrackModal();
+      showToast("Трек обновлён.");
+    });
+    return;
+  }
+
   if (formType === "support") {
     const body = trimSupportMessage(new FormData(form).get("body"));
 
@@ -2200,6 +2567,24 @@ function trimSupportMessage(value) {
 document.addEventListener("input", (event) => {
   const target = event.target;
 
+  // Слайдер оценки
+  if (target instanceof HTMLInputElement && target.dataset.rateSlider) {
+    const display = document.getElementById(`rss-${target.dataset.trackId}`);
+    if (display) display.textContent = target.value;
+    return;
+  }
+
+  // Плеер: громкость
+  if (target instanceof HTMLInputElement && target.dataset.ap === "volume") {
+    const audio = apGetAudio(target);
+    if (audio) {
+      audio.volume = Number(target.value) / 100;
+      audio.muted = audio.volume === 0;
+      apUpdateVolBtn(audio);
+    }
+    return;
+  }
+
   if (target instanceof HTMLInputElement && target.id === "search-input") {
     clearTimeout(searchTimer);
     searchTimer = setTimeout(() => {
@@ -2212,6 +2597,37 @@ document.addEventListener("input", (event) => {
     target.id === "support-message-input"
   ) {
     state.supportDraft = target.value.slice(0, 500);
+  }
+});
+
+document.addEventListener("change", (event) => {
+  const target = event.target;
+
+  if (target instanceof HTMLInputElement && target.id === "cover-input") {
+    const file = target.files?.[0];
+    const preview = document.getElementById("cover-zone-preview");
+    if (!preview) return;
+
+    if (!file) {
+      preview.style.backgroundImage = "";
+      preview.textContent = "🎨";
+      return;
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      showToast("Обложка больше 5 МБ — выбери файл поменьше.", true);
+      target.value = "";
+      preview.style.backgroundImage = "";
+      preview.textContent = "🎨";
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      preview.style.backgroundImage = `url(${e.target.result})`;
+      preview.textContent = "";
+    };
+    reader.readAsDataURL(file);
   }
 });
 

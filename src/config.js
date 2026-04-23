@@ -45,10 +45,12 @@ export const config = {
   wavDir: path.join(rootDir, 'data', 'uploads', 'wav'),
   mp3Dir: path.join(rootDir, 'data', 'uploads', 'mp3'),
   avatarDir: path.join(rootDir, 'data', 'uploads', 'avatars'),
+  coverDir: path.join(rootDir, 'data', 'uploads', 'covers'),
   publicDir: path.join(rootDir, 'public'),
   maxJsonBytes: 1_000_000,
   maxAudioBytes: 60 * 1024 * 1024,
   maxAvatarBytes: 5 * 1024 * 1024,
+  maxCoverBytes: 5 * 1024 * 1024,
 };
 
 export function isAdminIdentity(identity) {

@@ -10,6 +10,7 @@ const uploadFolders = {
   wav: config.wavDir,
   mp3: config.mp3Dir,
   avatars: config.avatarDir,
+  covers: config.coverDir,
 };
 
 let ffmpegCheckPromise;
